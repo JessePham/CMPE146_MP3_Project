@@ -6,6 +6,9 @@
 #include "function_types.h"
 #include "lpc40xx.h"
 
+void gpio_interrupt(void);
+void pin30_isr(void);
+
 /**
  * _estack symbol is actually a pointer to the start of the stack memory (provided by the linker script).
  * Declaring as unsigned int to inform compiler that this symbol is constant and defined at link time.

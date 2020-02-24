@@ -35,7 +35,7 @@ void adc_task(void *p) {
 
     adc_reading = adc__get_channel_reading_with_burst_mode(ADC__CHANNEL_5);
     if (xQueueSend(adc_to_pwm_task_queue, &adc_reading, 100)) {
-      fprintf(stderr, "Voltage: %fV\n", ((adc_reading * 3.3) / 4096));
+      // fprintf(stderr, "Voltage: %fV\n", ((adc_reading * 3.3) / 4096));
     } else {
       puts("Nothing Sent");
     }
@@ -47,6 +47,10 @@ void adc_task(void *p) {
 void pin_configure_pwm_channel_as_io_pin() {
   LPC_IOCON->P2_0 &= ~(7 << 0);
   LPC_IOCON->P2_0 |= (1 << 0);
+  LPC_IOCON->P2_1 &= ~(7 << 0);
+  LPC_IOCON->P2_1 |= (1 << 0);
+  LPC_IOCON->P2_2 &= ~(7 << 0);
+  LPC_IOCON->P2_2 |= (1 << 0);
 }
 
 void pwm_task(void *p) {
@@ -55,13 +59,46 @@ void pwm_task(void *p) {
 
   pwm1__init_single_edge(1000);
   pin_configure_pwm_channel_as_io_pin();
-  pwm1__set_duty_cycle(PWM1__2_0, 50);
 
   while (1) {
     // Implement code to receive potentiometer value from queue
     if (xQueueReceive(adc_to_pwm_task_queue, &adc_reading, 100)) {
-      pwm1__set_duty_cycle(PWM1__2_0, adc_reading);
+      if (adc_reading <= 10) {
+        pwm1__set_duty_cycle(PWM1__2_0, 0);
+        pwm1__set_duty_cycle(PWM1__2_1, 0);
+        pwm1__set_duty_cycle(PWM1__2_2, 0);
+      } else if (adc_reading > 10 && adc_reading < 500) {
+        pwm1__set_duty_cycle(PWM1__2_0, adc_reading);
+        pwm1__set_duty_cycle(PWM1__2_1, 0);
+        pwm1__set_duty_cycle(PWM1__2_2, 0);
+      } else if (adc_reading >= 500 && adc_reading < 1000) {
+        pwm1__set_duty_cycle(PWM1__2_0, 0);
+        pwm1__set_duty_cycle(PWM1__2_1, 0);
+        pwm1__set_duty_cycle(PWM1__2_2, adc_reading - 500);
+      } else if (adc_reading >= 1000 && adc_reading < 1500) {
+        pwm1__set_duty_cycle(PWM1__2_0, 0);
+        pwm1__set_duty_cycle(PWM1__2_1, adc_reading - 1000);
+        pwm1__set_duty_cycle(PWM1__2_2, 0);
+      } else if (adc_reading >= 1500 && adc_reading < 2000) {
+        pwm1__set_duty_cycle(PWM1__2_0, 50);
+        pwm1__set_duty_cycle(PWM1__2_1, 50);
+        pwm1__set_duty_cycle(PWM1__2_2, 0);
+      } else if (adc_reading >= 2000 && adc_reading < 2500) {
+        pwm1__set_duty_cycle(PWM1__2_0, 0);
+        pwm1__set_duty_cycle(PWM1__2_1, 50);
+        pwm1__set_duty_cycle(PWM1__2_2, 50);
+      } else if (adc_reading >= 2500 && adc_reading < 3000) {
+        pwm1__set_duty_cycle(PWM1__2_0, 50);
+        pwm1__set_duty_cycle(PWM1__2_1, 0);
+        pwm1__set_duty_cycle(PWM1__2_2, 50);
+      } else if (adc_reading >= 3000 && adc_reading < 4000) {
+        pwm1__set_duty_cycle(PWM1__2_0, 50);
+        pwm1__set_duty_cycle(PWM1__2_1, 50);
+        pwm1__set_duty_cycle(PWM1__2_2, 50);
+      }
     }
+
+    fprintf(stderr, "%i\n", adc_reading);
   }
 }
 

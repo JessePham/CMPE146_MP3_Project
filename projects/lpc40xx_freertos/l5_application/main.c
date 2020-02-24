@@ -22,8 +22,6 @@ void pin_configure_adc_channel_as_io_pin(void) {
   LPC_IOCON->P1_31 &= ~(1 << 7);
 }
 
-uint16_t adc__get_channel_reading_with_burst_mode(adc_channel_e channel_num) { return adc__get_adc_value(channel_num); }
-
 void adc_task(void *p) {
   // NOTE: Reuse the code from Part 1
 
@@ -34,13 +32,10 @@ void adc_task(void *p) {
   pin_configure_adc_channel_as_io_pin(); // You need to write this function
 
   while (1) {
-    // Implement code to send potentiometer value on the queue
-    // a) read ADC input to 'int adc_reading'
-    // b) Send to queue: xQueueSend(adc_to_pwm_task_queue, &adc_reading, 0);
 
     adc_reading = adc__get_channel_reading_with_burst_mode(ADC__CHANNEL_5);
     if (xQueueSend(adc_to_pwm_task_queue, &adc_reading, 100)) {
-      fprintf(stderr, "Voltage: %iV\n", (adc_reading / 4096));
+      fprintf(stderr, "Voltage: %fV\n", ((adc_reading * 3.3) / 4096));
     } else {
       puts("Nothing Sent");
     }
@@ -96,8 +91,6 @@ void pin_configure_adc_channel_as_io_pin(void) {
   LPC_IOCON->P1_31 |= (1 << 3);
   LPC_IOCON->P1_31 &= ~(1 << 7);
 }
-
-uint16_t adc__get_channel_reading_with_burst_mode(adc_channel_e channel_num) { return adc__get_adc_value(channel_num); }
 
 void adc_task(void *p) {
   adc__initialize();

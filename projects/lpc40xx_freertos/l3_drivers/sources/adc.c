@@ -37,6 +37,21 @@ void adc__enable_burst_mode(void) {
   LPC_ADC->CR &= ~(7 << 24);
 }
 
+uint16_t adc__get_channel_reading_with_burst_mode(adc_channel_e channel_num) {
+  uint16_t result = 0;
+  if ((ADC__CHANNEL_2 == channel_num) || (ADC__CHANNEL_4 == channel_num) || (ADC__CHANNEL_5 == channel_num)) {
+    LPC_ADC->CR |= ((1 << channel_num) | (1 << 24));
+
+    while (!(LPC_ADC->GDR & (1 << 31))) { // Wait till conversion is complete
+      ;
+    }
+
+    result = (LPC_ADC->GDR >> 4) & (0x0FFF);
+  }
+
+  return result;
+}
+
 uint16_t adc__get_adc_value(adc_channel_e channel_num) {
   uint16_t result = 0;
   const uint16_t twelve_bits = 0x0FFF;

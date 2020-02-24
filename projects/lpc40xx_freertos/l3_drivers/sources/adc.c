@@ -5,6 +5,7 @@
 #include "clock.h"
 #include "lpc40xx.h"
 #include "lpc_peripherals.h"
+#include "stdio.h"
 
 /*******************************************************************************
  *
@@ -28,6 +29,12 @@ void adc__initialize(void) {
       break;
     }
   }
+}
+
+void adc__enable_burst_mode(void) {
+  LPC_SC->PCONP |= (1 << 12);
+  LPC_ADC->CR |= (1 << 16);
+  LPC_ADC->CR &= ~(7 << 24);
 }
 
 uint16_t adc__get_adc_value(adc_channel_e channel_num) {

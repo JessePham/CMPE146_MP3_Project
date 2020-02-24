@@ -4,6 +4,7 @@
         "gpio_isr.h": "c",
         "stdint.h": "c",
         "delay.h": "c",
-        "lpc_peripherals.h": "c"
+        "lpc_peripherals.h": "c",
+        "task.h": "c"
     }
 }

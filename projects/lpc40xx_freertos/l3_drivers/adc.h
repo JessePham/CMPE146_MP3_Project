@@ -19,6 +19,10 @@ typedef enum {
 
 void adc__initialize(void);
 
+uint16_t adc__get_channel_reading_with_burst_mode(adc_channel_e channel_num);
+
+void adc__enable_burst_mode(void);
+
 /**
  * Reads the given ADC channal and returns its digital value
  * This starts conversion of one channel, and should not be used from multiple tasks

@@ -1,6 +1,94 @@
-/*================== Lab 04 ADC + PWN ==================*/
-
+/*================== Lab 05 SPI Flash Interface ==================*/
 #if 1
+// Lab 5.0
+#include "FreeRTOS.h"
+#include "gpio.h"
+#include "spi.h"
+#include "task.h"
+#include <stdio.h>
+
+// TODO: Implement Adesto flash memory CS signal as a GPIO driver
+void adesto_cs(void);
+void adesto_ds(void);
+
+// TODO: Study the Adesto flash 'Manufacturer and Device ID' section
+typedef struct {
+  uint8_t manufacturer_id;
+  uint8_t device_id_1;
+  uint8_t device_id_2;
+  uint8_t extended_device_id;
+} adesto_flash_id_s;
+
+void adesto_cs(void) {
+  LPC_GPIO1->PIN &= ~(1 << 10); // Set *CS LOW
+}
+
+void adesto_ds(void) {
+  LPC_GPIO1->PIN |= (1 << 10); // Set *CS HIGH
+  LPC_GPIO1->PIN |= (1 << 10);
+}
+
+// TODO: Implement the code to read Adesto flash memory signature
+// TODO: Create struct of type 'adesto_flash_id_s' and return it
+adesto_flash_id_s adesto_read_signature(void) {
+  adesto_flash_id_s data = {0};
+
+  adesto_cs();
+
+  LPC_SSP2->DR = 0x9F; // Sending the Opcode
+  data.manufacturer_id = spi__exchange_byte(0xFF);
+  data.device_id_1 = spi__exchange_byte(0xFF);
+  data.device_id_2 = spi__exchange_byte(0xFF);
+  data.extended_device_id = spi__exchange_byte(0xFF);
+  adesto_ds();
+
+  return data;
+}
+
+void todo_configure_your_spi_pin_functions(void) {
+  // Setting up SCK
+  gpio__construct_with_function(GPIO__PORT_1, 0, GPIO__FUNCTION_4);
+  // Setting up MOSI
+  gpio__construct_with_function(GPIO__PORT_1, 1, GPIO__FUNCTION_4);
+  // Setting up MISO
+  gpio__construct_with_function(GPIO__PORT_1, 4, GPIO__FUNCTION_4);
+  // Setting up *CS
+  gpio__construct_with_function(GPIO__PORT_1, 10, GPIO__FUNCITON_0_IO_PIN);
+  gpio__construct_as_output(GPIO__PORT_1, 10);
+}
+
+void spi_task(void *p) {
+  const uint32_t spi_clock_mhz = 24;
+  spi__init(spi_clock_mhz);
+
+  // From the LPC schematics pdf, find the pin numbers connected to flash memory
+  // Read table 84 from LPC User Manual and configure PIN functions for SPI2 pins
+  // You can use gpio__construct_with_function() API from gpio.h
+  //
+  // Note: Configure only SCK2, MOSI2, MISO2.
+  // CS will be a GPIO output pin(configure and setup direction)
+  todo_configure_your_spi_pin_functions();
+
+  while (1) {
+    adesto_flash_id_s id = adesto_read_signature();
+    // TODO: printf the members of the 'adesto_flash_id_s' struct
+
+    printf("\nManufacturer ID: %x\nDevice ID_1: %x\nDevice ID_2: %x\nExtended Device ID: %x\n", id.manufacturer_id,
+           id.device_id_1, id.device_id_2, id.extended_device_id);
+
+    vTaskDelay(500);
+  }
+}
+
+void main(void) {
+  xTaskCreate(spi_task, "SPI_TASK", 4096 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+  vTaskStartScheduler();
+}
+
+#endif
+
+/*================== Lab 04 ADC + PWN ==================*/
+#if 0
 // Lab 4.2
 
 #include "adc.h"
@@ -35,7 +123,7 @@ void adc_task(void *p) {
 
     adc_reading = adc__get_channel_reading_with_burst_mode(ADC__CHANNEL_5);
     if (xQueueSend(adc_to_pwm_task_queue, &adc_reading, 100)) {
-      // fprintf(stderr, "Voltage: %fV\n", ((adc_reading * 3.3) / 4096));
+      fprintf(stderr, "Voltage: %.3fV\nADC: %d\n", ((adc_reading * 3.3) / 4096), adc_reading);
     } else {
       puts("Nothing Sent");
     }
@@ -67,38 +155,38 @@ void pwm_task(void *p) {
         pwm1__set_duty_cycle(PWM1__2_0, 0);
         pwm1__set_duty_cycle(PWM1__2_1, 0);
         pwm1__set_duty_cycle(PWM1__2_2, 0);
-      } else if (adc_reading > 10 && adc_reading < 500) {
+      } else if (adc_reading > 10 && adc_reading < 500) { // Red
         pwm1__set_duty_cycle(PWM1__2_0, adc_reading);
         pwm1__set_duty_cycle(PWM1__2_1, 0);
         pwm1__set_duty_cycle(PWM1__2_2, 0);
-      } else if (adc_reading >= 500 && adc_reading < 1000) {
-        pwm1__set_duty_cycle(PWM1__2_0, 0);
+      } else if (adc_reading >= 500 && adc_reading < 1000) { // Magenta
+        pwm1__set_duty_cycle(PWM1__2_0, 1000 - adc_reading);
         pwm1__set_duty_cycle(PWM1__2_1, 0);
         pwm1__set_duty_cycle(PWM1__2_2, adc_reading - 500);
-      } else if (adc_reading >= 1000 && adc_reading < 1500) {
+      } else if (adc_reading >= 1000 && adc_reading < 1500) { // Blue
         pwm1__set_duty_cycle(PWM1__2_0, 0);
-        pwm1__set_duty_cycle(PWM1__2_1, adc_reading - 1000);
-        pwm1__set_duty_cycle(PWM1__2_2, 0);
-      } else if (adc_reading >= 1500 && adc_reading < 2000) {
-        pwm1__set_duty_cycle(PWM1__2_0, 50);
-        pwm1__set_duty_cycle(PWM1__2_1, 50);
-        pwm1__set_duty_cycle(PWM1__2_2, 0);
-      } else if (adc_reading >= 2000 && adc_reading < 2500) {
-        pwm1__set_duty_cycle(PWM1__2_0, 0);
-        pwm1__set_duty_cycle(PWM1__2_1, 50);
-        pwm1__set_duty_cycle(PWM1__2_2, 50);
-      } else if (adc_reading >= 2500 && adc_reading < 3000) {
-        pwm1__set_duty_cycle(PWM1__2_0, 50);
         pwm1__set_duty_cycle(PWM1__2_1, 0);
-        pwm1__set_duty_cycle(PWM1__2_2, 50);
-      } else if (adc_reading >= 3000 && adc_reading < 4000) {
-        pwm1__set_duty_cycle(PWM1__2_0, 50);
-        pwm1__set_duty_cycle(PWM1__2_1, 50);
-        pwm1__set_duty_cycle(PWM1__2_2, 50);
+        pwm1__set_duty_cycle(PWM1__2_2, adc_reading);
+      } else if (adc_reading >= 1500 && adc_reading < 2000) { // Teal
+        pwm1__set_duty_cycle(PWM1__2_0, 0);
+        pwm1__set_duty_cycle(PWM1__2_1, adc_reading - 1500);
+        pwm1__set_duty_cycle(PWM1__2_2, 2000 - adc_reading);
+      } else if (adc_reading >= 2000 && adc_reading < 2500) { // Green
+        pwm1__set_duty_cycle(PWM1__2_0, 0);
+        pwm1__set_duty_cycle(PWM1__2_1, adc_reading);
+        pwm1__set_duty_cycle(PWM1__2_2, 0);
+      } else if (adc_reading >= 2500 && adc_reading < 3500) { // Yellow
+        pwm1__set_duty_cycle(PWM1__2_0, adc_reading - 2500);
+        pwm1__set_duty_cycle(PWM1__2_1, adc_reading);
+        pwm1__set_duty_cycle(PWM1__2_2, 0);
+      } else if (adc_reading >= 3500 && adc_reading < 4000) { // White
+        pwm1__set_duty_cycle(PWM1__2_0, adc_reading);
+        pwm1__set_duty_cycle(PWM1__2_1, adc_reading);
+        pwm1__set_duty_cycle(PWM1__2_2, adc_reading - 3500);
       }
     }
-
-    fprintf(stderr, "%i\n", adc_reading);
+    // fprintf(stderr, "\nM0: %li\nM1: %li\nM2: %li\nM3: %li\n", LPC_PWM1->MR0, LPC_PWM1->MR1, LPC_PWM1->MR2,
+    //         LPC_PWM1->MR3);
   }
 }
 

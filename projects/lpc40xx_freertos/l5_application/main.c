@@ -1,6 +1,469 @@
-/*================== Lab 05 SPI Flash Interface ==================*/
+// Lab 07 Watchdogs
 #if 1
-// Lab 5.0
+
+#include "FreeRTOS.h"
+#include "acceleration.h"
+#include "cli_handlers.h"
+#include "event_groups.h"
+#include "ff.h"
+#include "queue.h"
+#include "sj2_cli.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static QueueHandle_t sensor_queue;
+static EventGroupHandle_t xCreatedEventGroup;
+static EventBits_t uxBits;
+TaskHandle_t task1;
+TaskHandle_t task2;
+#define BIT_1 (1 << 1)
+#define BIT_2 (1 << 2)
+
+void write_file_using_fatfs_pi(acceleration__axis_data_s *data) {
+  const char *filename = "file.txt";
+  FIL file; // File handle
+  UINT bytes_written = 0;
+  FRESULT result = f_open(&file, filename, (FA_WRITE | FA_OPEN_APPEND));
+
+  if (FR_OK == result) {
+    char string[64];
+    sprintf(string, "%li, %i, %i, %i\n", xTaskGetTickCount(), data->x, data->y, data->z);
+    if (FR_OK == f_write(&file, string, strlen(string), &bytes_written)) {
+    } else {
+      printf("ERROR: Failed to write data to file\n");
+    }
+    f_close(&file);
+  } else {
+    printf("ERROR: Failed to open: %s\n", filename);
+  }
+}
+
+void watchdog_task(void *params) {
+  while (1) {
+
+    uxBits = xEventGroupWaitBits(xCreatedEventGroup, BIT_1 | BIT_2, pdTRUE, pdTRUE, 210);
+    if ((uxBits & (BIT_1 | BIT_2)) == (BIT_1 | BIT_2)) {
+      printf("Verified!\n");
+    } else if ((uxBits & BIT_1) == 0 && (uxBits & BIT_2) != 0) {
+      printf("Producer Task Failed to Check In!\n");
+    } else if ((uxBits & BIT_2) == 0 && (uxBits & BIT_1) != 0) {
+      printf("Consumer Task Failed to Check In!\n");
+    } else {
+      printf("Error with both tasks!\n");
+    }
+  }
+}
+
+void producer_task(void *p) {
+  acceleration__axis_data_s temp;
+  acceleration__axis_data_s calculated_average;
+  while (1) {
+    for (int i = 0; i < 100; i++) {
+      temp = acceleration__get_data();
+      calculated_average.x += temp.x;
+      calculated_average.y += temp.y;
+      calculated_average.z += temp.z;
+      vTaskDelay(1);
+    }
+    calculated_average.x = calculated_average.x / 100;
+    calculated_average.y = calculated_average.y / 100;
+    calculated_average.z = calculated_average.z / 100;
+
+    if (xQueueSend(sensor_queue, &calculated_average, 0)) {
+      uxBits = xEventGroupSetBits(xCreatedEventGroup, BIT_1);
+      vTaskDelay(100);
+    }
+  }
+}
+
+void consumer_task(void *p) {
+  acceleration__axis_data_s acceleration_value;
+
+  while (1) {
+    if (xQueueReceive(sensor_queue, &acceleration_value, portMAX_DELAY)) {
+      printf("%li, %i, %i, %i\n", xTaskGetTickCount(), acceleration_value.x, acceleration_value.y,
+             acceleration_value.z);
+      write_file_using_fatfs_pi(&acceleration_value);
+
+      uxBits = xEventGroupSetBits(xCreatedEventGroup, BIT_2);
+    }
+  }
+}
+
+void main(void) {
+  sensor_queue = xQueueCreate(1, sizeof(acceleration__axis_data_s));
+  xCreatedEventGroup = xEventGroupCreate();
+
+  acceleration__init();
+  sj2_cli__init();
+
+  xTaskCreate(producer_task, "Producer", 4096 / sizeof(void *), NULL, PRIORITY_MEDIUM, &task1);
+  xTaskCreate(consumer_task, "Consumer", 4096 / sizeof(void *), NULL, PRIORITY_MEDIUM, &task2);
+  xTaskCreate(watchdog_task, "Watchdog", 4096 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
+
+  vTaskStartScheduler();
+}
+
+#endif
+
+/*================== Homework Assignment FreeRTOS Producer and Consumer Tasks  ==================*/
+/*
+Explanation of Observations:
+1. Use higher priority for producer task, and note down the order of the print-outs
+  - The producer task starts with "Sending..." and then "0 Sent!"
+  - The consumer task then starts "Receiving..." and then "0 Received!"
+  - The producer is still on Delay of 1000ms, so consumer task starts again with "Receiving..."
+  - Nothing is in queue, so consumer sleeps.
+  - Producer wakes up and does "Sending..." and "1 Sent!" and goes to sleep for 1000ms
+  - Consumer wakes up and continues where it left off, so obtains from queue and prints "1 Received"
+
+2. Use higher priority for consumer task, and note down the order of the print-outs
+  - Consumer task starts with "Receiving..."
+    - Goes to sleep due to empty queue
+  - Producer task sends item to queue and prints "Sending..."
+    - Switches context to Consumer because Producer has Lower Precedence
+  - Consumer wakes up because there is item in queue and prints " 0 Received!"
+  - Consumer still has priority, so reruns task and prints "Receiving..."
+  - Consumer goes to sleep due to empty queue
+    - Context switches to Producer due to Consumer task sleeping
+  - Producer starts where it left off and prints "0 Sent!"
+    - Due to Consumer still sleeping, Producer rereuns task
+  - Producer sends item to queue and prints "Sending..."
+  - Consumer wakes up and runs its task
+  - Repeats
+
+3. Use same priority level for both tasks, and note down the order of the print-outs
+  - Consumer prints "Receiving..." and sleeps due to empty queue
+  - Producer prints "Sending..." and sends item to queue
+  - Producer prints "0 Sent!"
+  - Consumer then prints "0 Received!" and reruns task
+  - Consumer prints "Receiving..." and sleeps due to empty queue
+  - Repeats
+
+Additional Questions:
+1.  The purpose of the block time during xQueueReceive() is to allow the producer function to send an item into the
+queue if the producer function is of lower priority. It essentially allows the CPU to service other tasks while the
+current task is waiting for something to appear in the queue.
+
+2.	If we used the value 0 for the block time during xQueueReceive(), then the producer function will never be able
+to run if it is of lower priority than the consumer, thus starved. Once it finds out that there is no item in the queue,
+it will rerun its task once again in a continuous loop until there is an item in the queue, however, using our first
+example from Figure 1, since the producer function is of lower priority, it will never have a chance to send an item to
+the queue.
+
+*/
+#if 0
+
+#include "FreeRTOS.h"
+#include "cli_handlers.h"
+#include "gpio.h"
+#include "queue.h"
+#include "sj2_cli.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+static QueueHandle_t switch_queue;
+
+typedef enum { switch__off, switch__on } switch_e;
+
+switch_e get_switch_input_from_switch0() {
+  switch_e status = switch__off;
+
+  if (LPC_GPIO1->PIN & (1 << 19)) {
+    status = switch__on;
+  }
+
+  return status;
+}
+
+void producer(void *p) {
+  while (1) {
+    const switch_e switch_value = get_switch_input_from_switch0();
+
+    printf("\nSending...\n");
+    if (xQueueSend(switch_queue, &switch_value, 0)) {
+      printf("\n%i Sent!\n", switch_value);
+    }
+
+    vTaskDelay(1000);
+  }
+}
+
+void consumer(void *p) {
+  switch_e switch_value;
+  while (1) {
+    printf("\nReceiving...\n");
+    if (xQueueReceive(switch_queue, &switch_value, portMAX_DELAY)) {
+      printf("\n%i Received!\n", switch_value);
+    }
+  }
+}
+
+void configure_switch() {
+  gpio__construct_with_function(GPIO__PORT_1, 19, GPIO__FUNCITON_0_IO_PIN);
+  LPC_GPIO1->DIR &= ~(1 << 19);
+  LPC_IOCON->P1_19 &= ~(3 << 3);
+  LPC_IOCON->P1_19 |= (1 << 3);
+}
+
+void main(void) {
+  configure_switch();
+  sj2_cli__init();
+
+  xTaskCreate(producer, "Producer", 4096 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
+  xTaskCreate(consumer, "Consumer", 4096 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
+
+  // TODO Queue handle is not valid until you create it
+  switch_queue =
+      xQueueCreate(1, sizeof(switch_e)); // Choose depth of item being our enum (1 should be okay for this example)
+
+  vTaskStartScheduler();
+}
+
+#endif
+
+/*================== Lab 06 UART  ==================*/
+#if 0
+// Lab 6.3
+#include "FreeRTOS.h"
+#include "clock.h"
+#include "gpio.h"
+#include "stdlib.h"
+#include "task.h"
+#include "uart_lab.h"
+#include <string.h>
+
+void board_2_receiver_task(void *p) {
+  char number_as_string[16] = {0};
+  int counter = 0;
+
+  while (true) {
+    char byte = 0;
+    uart_lab__get_char_from_queue(&byte, portMAX_DELAY);
+    printf("Received: %c\n", byte);
+
+    // This is the last char, so print the number
+    if ('\0' == byte) {
+      number_as_string[counter] = '\0';
+      counter = 0;
+      printf("Received this number from the other board: %s\n", number_as_string);
+    }
+    // We have not yet received the NULL '\0' char, so buffer the data
+    else {
+      number_as_string[counter] = byte;
+      counter = counter + 1;
+      // TODO: Store data to number_as_string[] array one char at a time
+      // Hint: Use counter as an index, and increment it as long as we do not reach max value of 16
+    }
+  }
+}
+
+void uart_io_init(void) {
+  // Transmitter
+  gpio__construct_with_function(4, 28, GPIO__FUNCTION_2);
+  // Receiver
+  gpio__construct_with_function(4, 29, GPIO__FUNCTION_2);
+}
+
+void main(void) {
+  // TODO: Use uart_lab__init() function and initialize UART2 or UART3 (your choice)
+  // TODO: Pin Configure IO pins to perform UART2/UART3 function
+  uart_io_init();
+  uart_lab__init(UART_3, clock__get_core_clock_hz(), 115200);
+  uart__enable_receive_interrupt(UART_3);
+
+  xTaskCreate(board_2_receiver_task, "UART_RECEIVER", 4096 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+
+  vTaskStartScheduler();
+}
+#endif
+
+#if 0
+// Lab 6.3 THIS IS THINGS THAT WE DIDN'T TURN IN, BUT THE ONE ABOVE IS THE ONE I WILL TURN IN
+#include "FreeRTOS.h"
+#include "clock.h"
+#include "gpio.h"
+#include "stdlib.h"
+#include "task.h"
+#include "uart_lab.h"
+#include <string.h>
+
+// This task is done for you, but you should understand what this code is doing
+/*void board_1_sender_task(void *p) {
+  char number_as_string[16] = {0};
+
+  while (true) {
+    const int number = rand();
+    sprintf(number_as_string, "%i", number);
+
+    // Send one char at a time to the other board including terminating NULL char
+    for (int i = 0; i <= strlen(number_as_string); i++) {
+      uart_lab__polled_put(UART_3, number_as_string[i]);
+      printf("Sent: %c\n", number_as_string[i]);
+    }
+
+    printf("Sent: %i over UART to the other board\n", number);
+    vTaskDelay(3000);
+  }
+}*/
+
+void board_2_receiver_task(void *p) {
+  char number_as_string[16] = {0};
+  int counter = 0;
+
+  while (true) {
+    char byte = 0;
+    uart_lab__get_char_from_queue(&byte, portMAX_DELAY);
+    printf("Received: %c\n", byte);
+
+    // This is the last char, so print the number
+    if ('\0' == byte) {
+      number_as_string[counter] = '\0';
+      counter = 0;
+      printf("Received this number from the other board: %s\n", number_as_string);
+    }
+    // We have not yet received the NULL '\0' char, so buffer the data
+    else {
+      number_as_string[counter] = byte;
+      counter = counter + 1;
+      // TODO: Store data to number_as_string[] array one char at a time
+      // Hint: Use counter as an index, and increment it as long as we do not reach max value of 16
+    }
+  }
+}
+
+void uart_io_init(void) {
+  // Transmitter
+  gpio__construct_with_function(4, 28, GPIO__FUNCTION_2);
+  // Receiver
+  gpio__construct_with_function(4, 29, GPIO__FUNCTION_2);
+}
+
+void main(void) {
+  // TODO: Use uart_lab__init() function and initialize UART2 or UART3 (your choice)
+  // TODO: Pin Configure IO pins to perform UART2/UART3 function
+  uart_io_init();
+  uart_lab__init(UART_3, clock__get_core_clock_hz(), 115200);
+  uart__enable_receive_interrupt(UART_3);
+
+  // xTaskCreate(board_1_sender_task, "UART_SENDER", 4096 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+  xTaskCreate(board_2_receiver_task, "UART_RECEIVER", 4096 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+
+  vTaskStartScheduler();
+}
+
+/*
+void uart_read_task(void *p) {
+  char ch_in;
+  while (1) {
+    // TODO: Use uart_lab__polled_get() function and printf the received value
+    if (uart_lab__get_char_from_queue(&ch_in, portMAX_DELAY)) {
+      printf("Received Character: %c", ch_in);
+    }
+  }
+}
+
+void uart_write_task(void *p) {
+  while (1) {
+    // TODO: Use uart_lab__polled_put() function and send a value
+    if (uart_lab__polled_put(UART_3, 'f')) {
+      printf("\nSent!\n");
+    }
+    vTaskDelay(500);
+  }
+}*/
+#endif
+
+/*================== Lab 05 SPI Flash Interface ==================*/
+#if 0
+#include "FreeRTOS.h"
+#include "delay.h"
+#include "gpio.h"
+#include "semphr.h"
+#include "spi.h"
+#include "task.h"
+#include <stdio.h>
+
+SemaphoreHandle_t spi_bus_mutex;
+
+typedef struct {
+  uint8_t manufacturer_id;
+  uint8_t device_id_1;
+  uint8_t device_id_2;
+  uint8_t extended_device_id;
+} adesto_flash_id_s;
+
+void adesto_cs(void) {
+  LPC_GPIO1->PIN &= ~(1 << 10); // Set *CS LOW
+  LPC_GPIO2->PIN &= ~(1 << 0);
+}
+
+void adesto_ds(void) {
+  LPC_GPIO1->PIN |= (1 << 10); // Set *CS HIGH
+  LPC_GPIO2->PIN |= (1 << 0);
+}
+
+adesto_flash_id_s adesto_read_signature(void) {
+  adesto_flash_id_s data = {0};
+  if (xSemaphoreTake(spi_bus_mutex, 1000)) {
+    adesto_cs();
+    LPC_SSP2->DR = spi__exchange_byte(0x9F); // Sending the Opcode
+    data.manufacturer_id = spi__exchange_byte(0xFF);
+    data.device_id_1 = spi__exchange_byte(0xFF);
+    data.device_id_2 = spi__exchange_byte(0xFF);
+    data.extended_device_id = LPC_SSP2->DR;
+    printf("\n\n%x, %x, %x, %x\n", data.manufacturer_id, data.device_id_1, data.device_id_2, data.extended_device_id);
+    adesto_ds();
+    xSemaphoreGive(spi_bus_mutex);
+  }
+  return data;
+}
+
+void spi_pin_configuration(void) {
+  // Setting up SCK
+  gpio__construct_with_function(GPIO__PORT_1, 0, GPIO__FUNCTION_4);
+  // Setting up MOSI
+  gpio__construct_with_function(GPIO__PORT_1, 1, GPIO__FUNCTION_4);
+  // Setting up MISO
+  gpio__construct_with_function(GPIO__PORT_1, 4, GPIO__FUNCTION_4);
+  // Setting up *CS
+  gpio__construct_with_function(GPIO__PORT_1, 10, GPIO__FUNCITON_0_IO_PIN);
+  gpio__construct_as_output(GPIO__PORT_1, 10);
+
+  // Fake *CS
+  gpio__construct_with_function(GPIO__PORT_2, 0, GPIO__FUNCITON_0_IO_PIN);
+  gpio__construct_as_output(GPIO__PORT_2, 0);
+}
+
+void spi_id_verification_task(void *p) {
+  while (1) {
+    const adesto_flash_id_s id = adesto_read_signature();
+    // When we read a manufacturer ID we do not expect, we will kill this task
+    if (id.manufacturer_id != 0x1F) {
+      fprintf(stderr, "Manufacturer ID read failure\n");
+      vTaskSuspend(NULL); // Kill this task
+    }
+  }
+}
+
+void main(void) {
+  // TODO: Initialize your SPI, its pins, Adesto flash CS GPIO etc...
+  const uint32_t spi_clock_mhz = 24;
+  spi__init(spi_clock_mhz);
+  spi_pin_configuration();
+
+  spi_bus_mutex = xSemaphoreCreateMutex();
+
+  // Create two tasks that will continously read signature
+  xTaskCreate(spi_id_verification_task, "SPI_ID_TASK1", 4096 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+  xTaskCreate(spi_id_verification_task, "SPI_ID_TASK2", 4096 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+
+  vTaskStartScheduler();
+}
+#endif
+#if 0
+// Lab 5.1
 #include "FreeRTOS.h"
 #include "gpio.h"
 #include "spi.h"
@@ -21,11 +484,12 @@ typedef struct {
 
 void adesto_cs(void) {
   LPC_GPIO1->PIN &= ~(1 << 10); // Set *CS LOW
+  LPC_GPIO2->PIN &= ~(1 << 0);
 }
 
 void adesto_ds(void) {
   LPC_GPIO1->PIN |= (1 << 10); // Set *CS HIGH
-  LPC_GPIO1->PIN |= (1 << 10);
+  LPC_GPIO2->PIN |= (1 << 0);
 }
 
 // TODO: Implement the code to read Adesto flash memory signature
@@ -34,8 +498,7 @@ adesto_flash_id_s adesto_read_signature(void) {
   adesto_flash_id_s data = {0};
 
   adesto_cs();
-
-  LPC_SSP2->DR = 0x9F; // Sending the Opcode
+  spi__exchange_byte(0x9F); // Sending the Opcode
   data.manufacturer_id = spi__exchange_byte(0xFF);
   data.device_id_1 = spi__exchange_byte(0xFF);
   data.device_id_2 = spi__exchange_byte(0xFF);
@@ -55,10 +518,14 @@ void todo_configure_your_spi_pin_functions(void) {
   // Setting up *CS
   gpio__construct_with_function(GPIO__PORT_1, 10, GPIO__FUNCITON_0_IO_PIN);
   gpio__construct_as_output(GPIO__PORT_1, 10);
+
+  // Fake *CS
+  gpio__construct_with_function(GPIO__PORT_2, 0, GPIO__FUNCITON_0_IO_PIN);
+  gpio__construct_as_output(GPIO__PORT_2, 0);
 }
 
 void spi_task(void *p) {
-  const uint32_t spi_clock_mhz = 24;
+  const uint32_t spi_clock_mhz = 1; // Setting clock to 1 MHz to see the waveform generation (as suggested by Preet)
   spi__init(spi_clock_mhz);
 
   // From the LPC schematics pdf, find the pin numbers connected to flash memory

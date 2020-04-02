@@ -3,8 +3,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "clock.h"
-
 void spi__init(uint32_t max_clock_mhz) {
   // Refer to LPC User manual and setup the register bits correctly
   // a) Power on Peripheral
@@ -17,14 +15,22 @@ void spi__init(uint32_t max_clock_mhz) {
   LPC_SSP2->CR0 &= ~(0xF);
   LPC_SSP2->CR0 |= (7 << 0);
   LPC_SSP2->CR0 &= ~(3 << 4);
-  LPC_SSP2->CR0 &= ~(0xFF << 8);
+  LPC_SSP2->CR0 &= ~(0xFF << 8); // SCR = 0
 
   // CONTROL REGISTER 1
-  LPC_SSP2->CR1 |= (1 << 1);
+  LPC_SSP2->CR1 |= (1 << 1); // Enables SSP Controller
 
   // c) Setup prescalar register to be <= max_clock_mhz
   // {PCLK / [CPSDVSR * (SCR + 1)]}
-  LPC_SSP2->CPSR = 8;
+
+  uint8_t dvsr = 2;
+  uint32_t cpu_clock_MHz = 96;
+  // dividing the cpu clock's cycle until it is less than the input clock
+  while (max_clock_mhz < (cpu_clock_MHz / dvsr) && dvsr <= 254) {
+    dvsr += 2; // divider is in increments of 2 as per stated in page 613: "This even value between 2 and 254..."
+  }
+
+  LPC_SSP2->CPSR = dvsr;
 }
 
 uint8_t spi__exchange_byte(uint8_t data_out) {

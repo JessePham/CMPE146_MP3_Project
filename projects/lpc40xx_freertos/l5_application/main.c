@@ -1,5 +1,143 @@
-// Lab 07 Watchdogs
+// Lab 08 I2C
+
 #if 1
+
+#if 0
+#include "delay.h"
+#include "gpio.h"
+#include "i2c.h"
+#include "i2c_slave_functions.h"
+#include "i2c_slave_init.h"
+#include <stdbool.h>
+#include <stdio.h>
+
+static volatile uint8_t slave_memory[256];
+
+bool i2c_slave_callback__read_memory(uint8_t memory_index, uint8_t *memory) {
+  *memory = slave_memory[memory_index];
+
+  return ((slave_memory[memory_index] == *memory) ? true : false);
+}
+
+bool i2c_slave_callback__write_memory(uint8_t memory_index, uint8_t memory_value) {
+  slave_memory[memory_index] = memory_value;
+
+  return ((memory_value = slave_memory[memory_index]) ? true : false);
+}
+
+void turn_on_an_led() { LPC_GPIO2->PIN &= ~(1 << 3); }
+
+void turn_off_an_led() { LPC_GPIO2->PIN |= (1 << 3); }
+
+int main(void) {
+  i2c2__slave_init(0x86);
+
+  LPC_IOCON->P2_3 = 0;
+  LPC_GPIO2->DIR |= (1 << 3);
+
+  printf("Starting!\n");
+  while (1) {
+    delay__ms(500);
+    if (slave_memory[0] == 0) {
+      turn_on_an_led(); // TODO
+    } else {
+      turn_off_an_led(); // TODO
+    }
+
+  return -1;
+}
+#endif
+
+#if 0
+#include "FreeRTOS.h"
+#include "cli_handlers.h"
+#include "delay.h"
+#include "gpio.h"
+#include "i2c.h"
+#include "i2c_slave_functions.h"
+#include "i2c_slave_init.h"
+#include "sj2_cli.h"
+#include "stdio.h"
+#include "task.h"
+#include <stdbool.h>
+
+static volatile uint8_t slave_memory[256];
+
+bool i2c_slave_callback__read_memory(uint8_t memory_index, uint8_t *memory) {
+  *memory = slave_memory[memory_index];
+
+  printf("\nValue from callback: %i\n", slave_memory[memory_index]);
+
+  return ((slave_memory[memory_index] == *memory) ? true : false);
+}
+
+bool i2c_slave_callback__write_memory(uint8_t memory_index, uint8_t memory_value) {
+  slave_memory[memory_index] = memory_value;
+
+  return ((memory_value = slave_memory[memory_index]) ? true : false);
+}
+
+void test_function(void *p) {
+  while (1) {
+  }
+}
+
+int main(void) {
+  sj2_cli__init();
+
+  xTaskCreate(test_function, "test", 4096 / sizeof(void *), NULL, PRIORITY_MEDIUM, NULL);
+
+  vTaskStartScheduler();
+
+  return -1;
+}
+#endif
+
+/*
+// Slave Code
+#include "FreeRTOS.h"
+#include "gpio.h"
+#include "i2c_slave_init.h"
+#include "stdint.h"
+#include "task.h"
+
+#define SLAVE_ADDRESS 0x20
+
+void main(void) {
+  // Set I2C SDA Pin
+  gpio__construct_with_function(GPIO__PORT_0, 10, GPIO__FUNCTION_2);
+  // Set I2C SCL Pin
+  gpio__construct_with_function(GPIO__PORT_0, 11, GPIO__FUNCTION_2);
+
+  i2c2__slave_init(SLAVE_ADDRESS);
+
+  vTaskStartScheduler();
+}*/
+
+/*
+// Master Code
+#include "FreeRTOS.h"
+#include "gpio.h"
+#include "i2c_slave_init.h"
+#include "stdint.h"
+#include "task.h"
+
+#define SLAVE_ADDRESS 0x20
+
+void main(void) {
+  // Set I2C SDA Pin
+  gpio__construct_with_function(GPIO__PORT_0, 10, GPIO__FUNCTION_2);
+  // Set I2C SCL Pin
+  gpio__construct_with_function(GPIO__PORT_0, 11, GPIO__FUNCTION_2);
+
+  vTaskStartScheduler();
+}
+*/
+
+#endif
+
+// Lab 07 Watchdogs
+#if 0
 
 #include "FreeRTOS.h"
 #include "acceleration.h"
@@ -201,7 +339,7 @@ void consumer(void *p) {
 }
 
 void configure_switch() {
-  gpio__construct_with_function(GPIO__PORT_1, 19, GPIO__FUNCITON_0_IO_PIN);
+  gpio__construct_with_function(GPIO__PORT_1, 19, GPIO__FUNCITON_0_IO_PINgpio);
   LPC_GPIO1->DIR &= ~(1 << 19);
   LPC_IOCON->P1_19 &= ~(3 << 3);
   LPC_IOCON->P1_19 |= (1 << 3);

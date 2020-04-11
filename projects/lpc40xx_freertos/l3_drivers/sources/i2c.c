@@ -8,8 +8,10 @@
 #include "lpc40xx.h"
 #include "lpc_peripherals.h"
 
+#include "i2c_slave_functions.h"
+
 /// Set to non-zero to enable debugging, and then you can use I2C__DEBUG_PRINTF()
-#define I2C__ENABLE_DEBUGGING 0
+#define I2C__ENABLE_DEBUGGING 1
 
 #if I2C__ENABLE_DEBUGGING
 #include <stdio.h>
@@ -43,6 +45,9 @@ typedef struct {
   uint8_t *input_byte_pointer;        ///< Used for reading I2C slave device
   const uint8_t *output_byte_pointer; ///< Used for writing data to the I2C slave device
   size_t number_of_bytes_to_transfer;
+
+  bool first_cycle;
+  uint8_t slave_memory_index;
 } i2c_s;
 
 /// Instances of structs for each I2C peripheral
@@ -294,6 +299,47 @@ static bool i2c__handle_state_machine(i2c_s *i2c) {
   I2C__DEBUG_PRINTF("  HW State: 0x%02X", i2c_state);
 
   switch (i2c_state) {
+  case 0x60:
+    i2c__set_ack_flag(lpc_i2c);
+    i2c__clear_si_flag_for_hw_to_take_next_action(lpc_i2c);
+    i2c->first_cycle = true;
+    break;
+
+  case 0x80:
+    i2c__set_ack_flag(lpc_i2c);
+    i2c__clear_si_flag_for_hw_to_take_next_action(lpc_i2c);
+    if (i2c->first_cycle) {
+      i2c->first_cycle = false;
+      i2c->slave_memory_index = lpc_i2c->DAT;
+    } else {
+      i2c_slave_callback__write_memory(i2c->slave_memory_index++, lpc_i2c->DAT);
+    }
+    break;
+
+  case 0xA0:
+    i2c__set_ack_flag(lpc_i2c);
+    i2c__clear_si_flag_for_hw_to_take_next_action(lpc_i2c);
+    break;
+
+  case 0xA8:
+    i2c__set_ack_flag(lpc_i2c);
+    i2c_slave_callback__read_memory(i2c->slave_memory_index++, i2c->input_byte_pointer);
+    lpc_i2c->DAT = *(i2c->input_byte_pointer);
+    i2c__clear_si_flag_for_hw_to_take_next_action(lpc_i2c);
+    break;
+
+  case 0xB8:
+    i2c__set_ack_flag(lpc_i2c);
+    i2c_slave_callback__read_memory(i2c->slave_memory_index++, i2c->input_byte_pointer);
+    lpc_i2c->DAT = *(i2c->input_byte_pointer);
+    i2c__clear_si_flag_for_hw_to_take_next_action(lpc_i2c);
+    break;
+
+  case 0xC0:
+    i2c__set_start_flag(lpc_i2c);
+    i2c__clear_si_flag_for_hw_to_take_next_action(lpc_i2c);
+    break;
+
   // Start condition sent, so send the device address
   case I2C__STATE_START:
     lpc_i2c->DAT = i2c__write_address(i2c->slave_address);

@@ -11,6 +11,11 @@
         "clock.h": "c",
         "app_cli.h": "c",
         "acceleration.h": "c",
-        "queue.h": "c"
+        "queue.h": "c",
+        "i2c_slave_init.h": "c",
+        "gpio.h": "c",
+        "stdbool.h": "c",
+        "i2c_slave_functions.h": "c",
+        "cli_handlers.h": "c"
     }
 }

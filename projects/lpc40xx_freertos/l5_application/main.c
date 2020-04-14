@@ -1,7 +1,171 @@
-// Lab 08 I2C
-
 #if 1
+#include "ff.h"
+#include <stdio.h>
+#include <stdlib.h>
 
+#include "FreeRTOS.h"
+#include "cli_handlers.h"
+#include "queue.h"
+#include "sj2_cli.h"
+#include "string.h"
+
+void mp3_reader_task(void *p);
+void mp3_player_task(void *p);
+typedef char songname_t[32];
+QueueHandle_t Q_songname;
+QueueHandle_t Q_songdata;
+FIL file; // File handle
+int main(void) {
+  Q_songname = xQueueCreate(1, sizeof(songname_t));
+  Q_songdata = xQueueCreate(1, 512);
+  xTaskCreate(mp3_reader_task, "mp3_read", 2048 / sizeof(void *), NULL, 1, NULL);
+  xTaskCreate(mp3_player_task, "mp3_play", 2048 / sizeof(void *), NULL, 1, NULL);
+  sj2_cli__init();
+  vTaskStartScheduler();
+  return 0;
+}
+void mp3_reader_task(void *p) {
+  songname_t name;
+  char bytes_512[512];
+  UINT bytes_read = 0;
+  while (1) {
+    if (xQueueReceive(Q_songname, &name[0], portMAX_DELAY)) {
+      printf("Song recieved: %s\n", name);
+      FRESULT read_file = f_open(&file, &name[0], FA_READ);
+      if (FR_OK == read_file) {
+        while (!f_eof(&file)) {
+          if (FR_OK == f_read(&file, bytes_512, 512, &bytes_read)) {
+            printf("\nSong Data Sent: \n");
+            for (int i = 0; i < sizeof(bytes_512); i++) {
+              // printf("%x ", bytes_512[i]);
+            }
+            xQueueSend(Q_songdata, &bytes_512[0], portMAX_DELAY);
+            vTaskDelay(300);
+          } else {
+            printf("ERROR: Failed to read data to file\n");
+          }
+        }
+      } else {
+        printf("file doesnt exist\n");
+      }
+      f_close(&file);
+    }
+  }
+}
+void mp3_player_task(void *p) {
+  char bytes_512[512];
+  while (1) {
+    if (xQueueReceive(Q_songdata, &bytes_512[0], portMAX_DELAY)) {
+      printf("Song Data Received: \n");
+      for (int i = 0; i < sizeof(bytes_512); i++) {
+        printf("%x ", bytes_512[i]);
+        //   // putchar(bytes_512[i]);
+      }
+    }
+  }
+}
+
+app_cli_status_e cli__mp3_play(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
+                               app_cli__print_string_function cli_output) {
+  // user_input_minus_command_name is actually a 'char *' pointer type
+  // We tell the Queue to copy 32 bytes of songname from this location
+  xQueueSend(Q_songname, user_input_minus_command_name, portMAX_DELAY);
+
+  printf("Sent %s over to the Q_songname\n", user_input_minus_command_name);
+  return APP_CLI_STATUS__SUCCESS;
+}
+#endif
+
+#if 0
+#include "ff.h"
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "FreeRTOS.h"
+#include "cli_handlers.h"
+#include "queue.h"
+#include "sj2_cli.h"
+typedef char songname_t[16];
+
+QueueHandle_t Q_songname;
+QueueHandle_t Q_songdata;
+
+// Reader tasks receives song-name over Q_songname to start reading it
+void mp3_reader_task(void *p) {
+  songname_t name;
+  char bytes_512[512];
+
+  const char *filename = "file.txt";
+
+  FIL file;
+
+  while (1) {
+    xQueueReceive(Q_songname, &name[0], portMAX_DELAY);
+    fprintf(stderr, "Received song to play: %s\n", name);
+
+    FRESULT result = f_open(&file, filename, (FA_READ | FA_OPEN_EXISTING));
+    if (FR_OK != result) {
+      fprintf(stderr, "Error opening file %s", filename);
+    } else {
+      while (FR_OK == result) {
+        // read_from_file(bytes_512); TO DO!!!!
+        xQueueSend(Q_songdata, &bytes_512[0], portMAX_DELAY);
+      }
+      f_close(&file);
+    }
+  }
+}
+
+bool mp3_decoder_needs_data() { return true; }
+void spi_send_to_mp3_decoder(char bytes) {}
+
+// Player task receives song data over Q_songdata to send it to the MP3 decoder
+void mp3_player_task(void *p) {
+  char bytes_512[512];
+
+  while (1) {
+    if (xQueueReceive(Q_songdata, &bytes_512[0], portMAX_DELAY)){
+      fprintf(stderr, "Received!!!\n");
+    }
+    for (int i = 0; i < sizeof(bytes_512); i++) {
+      while (!mp3_decoder_needs_data()) {
+        vTaskDelay(1);
+      }
+
+      spi_send_to_mp3_decoder(bytes_512[i]);
+    }
+  }
+}
+
+// CLI needs access to the QueueHandle_t where you can queue the song name
+// One way to do this is to declare 'QueueHandle_t' in main() that is NOT static
+// and then extern it here
+
+app_cli_status_e cli__mp3_play(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
+                               app_cli__print_string_function cli_output) {
+  // user_input_minus_command_name is actually a 'char *' pointer type
+  // We tell the Queue to copy 32 bytes of songname from this location
+  xQueueSend(Q_songname, user_input_minus_command_name, portMAX_DELAY);
+
+  printf("Sent %s over to the Q_songname\n", user_input_minus_command_name);
+  return APP_CLI_STATUS__SUCCESS;
+}
+
+void main(void) {
+  Q_songname = xQueueCreate(1, sizeof(songname_t));
+  Q_songdata = xQueueCreate(1, 512);
+
+  sj2_cli__init();
+
+  xTaskCreate(mp3_reader_task, "reader_task", 4096 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+  xTaskCreate(mp3_player_task, "player_task", 4096 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
+
+  vTaskStartScheduler();
+}
+#endif
+
+// Lab 08 I2C
+#if 1
 #if 0
 #include "delay.h"
 #include "gpio.h"
@@ -44,7 +208,8 @@ int main(void) {
       turn_off_an_led(); // TODO
     }
 
-  return -1;
+    return -1;
+  }
 }
 #endif
 

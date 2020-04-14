@@ -7,6 +7,9 @@
 static void cli__task_list_print(sl_string_t user_input_minus_command_name, app_cli__print_string_function cli_output);
 #endif
 
+app_cli_status_e cli__mp3_play(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
+                               app_cli__print_string_function cli_output);
+
 // THESE CLI HANDLERS WERE FOR WATCHDOG LAB!!!
 /*app_cli_status_e cli__task_suspend(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
                                    app_cli__print_string_function cli_output) {

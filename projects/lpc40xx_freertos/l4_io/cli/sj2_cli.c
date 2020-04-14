@@ -37,6 +37,9 @@ void sj2_cli__init(void) {
   static app_cli__command_s your_cli_struct = {
       .command_name = "taskcontrol", .help_message_for_command = "help message", .app_cli_handler = cli__your_handler};
 
+  static app_cli__command_s mp3_play = {
+      .command_name = "play", .help_message_for_command = "play SONGNAME.mp3", .app_cli_handler = cli__mp3_play};
+
   // WATCHDOG LAB
   /*static app_cli__command_s task_suspend = {
       .command_name = "suspend", .help_message_for_command = "Suspends task", .app_cli_handler = cli__task_suspend};
@@ -49,6 +52,7 @@ void sj2_cli__init(void) {
   app_cli__add_command_handler(&sj2_cli_struct, &i2c);
   app_cli__add_command_handler(&sj2_cli_struct, &crash);
   app_cli__add_command_handler(&sj2_cli_struct, &your_cli_struct);
+  app_cli__add_command_handler(&sj2_cli_struct, &mp3_play);
 
   // WATCHDOG LAB
   /*

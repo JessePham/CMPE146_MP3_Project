@@ -20,6 +20,14 @@ void sj2_cli__init(void) {
   sj2_cli_struct = app_cli__initialize(4, sj2_cli__output_function, separator);
 
   // Need static struct that does not go out of scope
+  static app_cli__command_s mp3_play = {
+      .command_name = "play", .help_message_for_command = "Play MP3 Song\n", .app_cli_handler = cli__mp3_play};
+  static app_cli__command_s task_resume = {.command_name = "resume",
+                                           .help_message_for_command = "Resume tasks by name\n",
+                                           .app_cli_handler = cli__task_resume};
+  static app_cli__command_s task_suspend = {.command_name = "suspend",
+                                            .help_message_for_command = "Suspend tasks by name\n",
+                                            .app_cli_handler = cli__task_suspend};
   static app_cli__command_s crash = {.command_name = "crash",
                                      .help_message_for_command =
                                          "Deliberately crashes the system to demonstrate how to debug a crash",
@@ -34,30 +42,13 @@ void sj2_cli__init(void) {
                                              "tasklist <time>' will display CPU utilization within this time window.",
                                          .app_cli_handler = cli__task_list};
 
-  static app_cli__command_s your_cli_struct = {
-      .command_name = "taskcontrol", .help_message_for_command = "help message", .app_cli_handler = cli__your_handler};
-
-  static app_cli__command_s mp3_play = {
-      .command_name = "play", .help_message_for_command = "play SONGNAME.mp3", .app_cli_handler = cli__mp3_play};
-
-  // WATCHDOG LAB
-  /*static app_cli__command_s task_suspend = {
-      .command_name = "suspend", .help_message_for_command = "Suspends task", .app_cli_handler = cli__task_suspend};
-
-  static app_cli__command_s task_resume = {
-      .command_name = "resume", .help_message_for_command = "Resumes task", .app_cli_handler = cli__task_resume};*/
-
   // Add your CLI commands in descending sorted order
   app_cli__add_command_handler(&sj2_cli_struct, &task_list);
   app_cli__add_command_handler(&sj2_cli_struct, &i2c);
   app_cli__add_command_handler(&sj2_cli_struct, &crash);
-  app_cli__add_command_handler(&sj2_cli_struct, &your_cli_struct);
-  app_cli__add_command_handler(&sj2_cli_struct, &mp3_play);
-
-  // WATCHDOG LAB
-  /*
   app_cli__add_command_handler(&sj2_cli_struct, &task_suspend);
-  app_cli__add_command_handler(&sj2_cli_struct, &task_resume);*/
+  app_cli__add_command_handler(&sj2_cli_struct, &task_resume);
+  app_cli__add_command_handler(&sj2_cli_struct, &mp3_play);
 
   // In case other tasks are hogging the CPU, it would be useful to run the CLI
   // at high priority to at least be able to see what is going on

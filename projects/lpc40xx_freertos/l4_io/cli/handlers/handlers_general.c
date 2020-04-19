@@ -1,73 +1,61 @@
 #include "cli_handlers.h"
 
 #include "FreeRTOS.h"
+#include "queue.h"
 #include "task.h"
+#include <stdio.h>
+
+TaskHandle_t producer_handle;
+TaskHandle_t consumer_handle;
+extern QueueHandle_t Q_songname;
 
 #if (0 != configUSE_TRACE_FACILITY)
 static void cli__task_list_print(sl_string_t user_input_minus_command_name, app_cli__print_string_function cli_output);
 #endif
 
-app_cli_status_e cli__mp3_play(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
-                               app_cli__print_string_function cli_output);
-
-// THESE CLI HANDLERS WERE FOR WATCHDOG LAB!!!
-/*app_cli_status_e cli__task_suspend(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
-                                   app_cli__print_string_function cli_output) {
-
-  extern TaskHandle_t task1;
-  extern TaskHandle_t task2;
-
-  sl_string_t s = user_input_minus_command_name;
-
-  if (sl_string__equals_to(s, "task1")) {
-    sl_string__printf(s, "Suspending task 1...\n");
-    vTaskSuspend(task1);
-  } else if (sl_string__equals_to(s, "task2")) {
-    sl_string__printf(s, "Suspending task 2\n");
-    vTaskSuspend(task2);
-  }
-
-  cli_output(NULL, s);
-
-  return APP_CLI_STATUS__SUCCESS;
-}
-
-app_cli_status_e cli__task_resume(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
-                                  app_cli__print_string_function cli_output) {
-  extern TaskHandle_t task1;
-  extern TaskHandle_t task2;
-
-  sl_string_t s = user_input_minus_command_name;
-
-  if (sl_string__equals_to(s, "task1")) {
-    sl_string__printf(s, "Resuming task 1...\n");
-    vTaskResume(task1);
-  } else if (sl_string__equals_to(s, "task2")) {
-    sl_string__printf(s, "Resuming task 2\n");
-    vTaskResume(task2);
-  }
-
-  cli_output(NULL, s);
-
-  return APP_CLI_STATUS__SUCCESS;
-}*/
-
-app_cli_status_e cli__your_handler(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
-                                   app_cli__print_string_function cli_output) {
-  // sl_string is a powerful string library, and you can utilize the sl_string.h API to parse parameters of a command
-
-  // Sample code to output data back to the CLI
-  sl_string_t s = user_input_minus_command_name; // Re-use a string to save memory
-  sl_string__printf(s, "Hello back to the CLI\n");
-  cli_output(NULL, s);
-
-  return APP_CLI_STATUS__SUCCESS;
-}
-
 app_cli_status_e cli__crash_me(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
                                app_cli__print_string_function cli_output) {
   uint32_t *bad_pointer = (uint32_t *)0x00000001;
   *bad_pointer = 0xDEADBEEF;
+  return APP_CLI_STATUS__SUCCESS;
+}
+
+app_cli_status_e cli__mp3_play(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
+                               app_cli__print_string_function cli_output) {
+  // user_input_minus_command_name is actually a 'char *' pointer type
+  // We tell the Queue to copy 32 bytes of songname from this location
+  xQueueSend(Q_songname, user_input_minus_command_name, portMAX_DELAY);
+
+  printf("Sent %s over to the Q_songname\n", user_input_minus_command_name);
+  return APP_CLI_STATUS__SUCCESS;
+}
+
+app_cli_status_e cli__task_suspend(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
+                                   app_cli__print_string_function cli_output) {
+  sl_string_t s = user_input_minus_command_name; // Re-use a string to save memory
+  cli_output(NULL, s);
+  if (sl_string__equals_to(s, "producer")) {
+    sl_string__printf(s, "suspend producer\n");
+    vTaskSuspend(producer_handle);
+  }
+  if (sl_string__equals_to(s, "consumer")) {
+    sl_string__printf(s, "suspend consumer\n");
+    vTaskSuspend(consumer_handle);
+  }
+  return APP_CLI_STATUS__SUCCESS;
+}
+app_cli_status_e cli__task_resume(app_cli__argument_t argument, sl_string_t user_input_minus_command_name,
+                                  app_cli__print_string_function cli_output) {
+  sl_string_t s = user_input_minus_command_name; // Re-use a string to save memory
+  cli_output(NULL, s);
+  if (sl_string__equals_to(s, "producer")) {
+    sl_string__printf(s, "resume producer\n");
+    vTaskResume(producer_handle);
+  }
+  if (sl_string__equals_to(s, "consumer")) {
+    sl_string__printf(s, "resume consumer\n");
+    vTaskResume(consumer_handle);
+  }
   return APP_CLI_STATUS__SUCCESS;
 }
 

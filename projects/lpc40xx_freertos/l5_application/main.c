@@ -1,4 +1,5 @@
 #include "ff.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -10,6 +11,7 @@
 #include "queue.h"
 #include "sj2_cli.h"
 #include "song_list.h"
+#include "spi.h"
 #include "ssp2.h"
 #include "string.h"
 
@@ -26,6 +28,8 @@ void initialize_decoder(void);
 void SCI_WRITE(uint8_t address, uint16_t value);
 void SDI_WRITE(uint8_t *data_buffer, uint8_t count);
 void set_volume(uint8_t volume);
+uint16_t SCI_READ(uint8_t address);
+bool mp3_decoder_needs_data(void);
 
 typedef char songname_t[32];
 
@@ -59,70 +63,78 @@ int main(void) {
   Q_songdata = xQueueCreate(1, 512);
   next_song_signal = xSemaphoreCreateBinary();
   prev_song_signal = xSemaphoreCreateBinary();
-  const uint32_t spi_clock_mhz = 1;
 
   initialize_lcd_pins();
   initialize_lcd_screen();
   initialize_buttons();
-  initialize_SPI_GPIO();
-  ssp2__initialize(spi_clock_mhz);
-
-  initialize_decoder();
-  set_volume(0x00);
-
   song_list__populate();
+  ssp2__initialize(24000);
+  initialize_SPI_GPIO();
+  initialize_decoder();
 
   xTaskCreate(next_song_task, "next_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(prev_song_task, "prev_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(display_songs_on_lcd, "display_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
-  xTaskCreate(mp3_reader_task, "mp3_read", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+  xTaskCreate(mp3_reader_task, "mp3_read", 2048 / sizeof(void *), NULL, PRIORITY_MEDIUM, NULL);
   xTaskCreate(mp3_player_task, "mp3_play", 2048 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
   sj2_cli__init();
   vTaskStartScheduler();
   return 0;
 }
-
-unsigned int vs1053_ReadRegister(unsigned char addressbyte) {
-  while (!gpio__get(DREQ))
-    ;                 // Wait for DREQ to go high indicating IC is available
-  gpio__reset(MP3CS); // Select control
-
-  // SCI consists of instruction byte, address byte, and 16-bit data word.
-  ssp2__exchange_byte(0x03); // Read instruction
-  ssp2__exchange_byte(addressbyte);
-
-  char response1 = ssp2__exchange_byte(0xFF); // Read the first byte
-  while (!gpio__get(DREQ))
-    ;                                         // Wait for DREQ to go high indicating command is complete
-  char response2 = ssp2__exchange_byte(0xFF); // Read the second byte
-  while (!gpio__get(DREQ))
-    ; // Wait for DREQ to go high indicating command is complete
-
-  gpio__set(MP3CS); // Deselect Control
-
-  int resultvalue = response1 << 8;
-  resultvalue |= response2;
-  return resultvalue;
+uint16_t SCI_READ(uint8_t address) {
+  while (!mp3_decoder_needs_data())
+    ;
+  gpio__reset(MP3CS);
+  ssp2__exchange_byte(0x03);
+  ssp2__exchange_byte(address);
+  uint8_t response1 = ssp2__exchange_byte(0xFF);
+  while (!mp3_decoder_needs_data())
+    ;
+  uint8_t response2 = ssp2__exchange_byte(0xFF);
+  while (!mp3_decoder_needs_data())
+    ;
+  gpio__set(MP3CS);
+  uint16_t resultValue = response1 << 8;
+  resultValue |= response2;
+  return resultValue;
 }
 
 void initialize_decoder(void) {
-  gpio__set(MP3CS);
-  gpio__set(XDCS);
+  gpio__reset(MP3CS);
   gpio__reset(RESET);
-  ssp2__exchange_byte(0xFF);
   delay__ms(10);
   gpio__set(RESET);
   delay__ms(10);
+  SCI_WRITE(0x00, 0xC890);
 
-  unsigned char start_up_volume = 20;
-  set_volume(start_up_volume);
-  unsigned int sciValue = vs1053_ReadRegister(0x00);
-  SCI_WRITE(0x00, sciValue | 0x0004); // SM_RESET at bit 2, SM_ADPCM at bit 12
-  delay__ms(100);
+  ssp2__set_max_clock(1000);
+  ssp2__exchange_byte(0xFF);
+  gpio__set(XDCS);
+  delay__ms(10);
 
-  SCI_WRITE(0x00, 0x0810); // prev 0x0810
-  SCI_WRITE(0x02, 0x7A00);
-  SCI_WRITE(0x03, 0xA000);
+  set_volume(40);
+
+  uint16_t SCI_MODE = SCI_READ(0x00);
+  uint16_t SCI_CLOCK = SCI_READ(0x03);
+  uint16_t SCI_STATUS = SCI_READ(0x01);
+
+  printf("\nstart_up mode: 0x%x\n", SCI_MODE);
+  printf("start_up clock: 0x%x\n", SCI_CLOCK);
+  printf("start_up status: 0x%x\n", SCI_STATUS);
+
+  SCI_WRITE(0x00, 0x0004); // soft reset
+  SCI_WRITE(0x00, 0x88D0); // set mode: prev 0x8880
+  SCI_WRITE(0x03, 0x2000); // set multiplier to 3x
+
+  SCI_MODE = SCI_READ(0x00);
+  SCI_CLOCK = SCI_READ(0x03);
+  SCI_STATUS = SCI_READ(0x01);
+
+  ssp2__set_max_clock(4000);
+
+  printf("\ninitialized mode: 0x%x\n", SCI_MODE);
+  printf("initialized clock: 0x%x\n", SCI_CLOCK);
+  printf("initialized status: 0x%x\n", SCI_STATUS);
 }
 void SDI_WRITE(uint8_t *data_buffer, uint8_t count) {
   gpio__reset(XDCS);
@@ -174,9 +186,9 @@ void initialize_buttons() {
 }
 
 void initialize_SPI_GPIO() {
-  gpio__construct_with_function(GPIO__PORT_1, 0, GPIO__FUNCTION_4);
-  gpio__construct_with_function(GPIO__PORT_1, 1, GPIO__FUNCTION_4);
-  gpio__construct_with_function(GPIO__PORT_1, 4, GPIO__FUNCTION_4);
+  gpio__construct_with_function(GPIO__PORT_1, 0, GPIO__FUNCTION_4); // SCK
+  gpio__construct_with_function(GPIO__PORT_1, 1, GPIO__FUNCTION_4); // MOSI
+  gpio__construct_with_function(GPIO__PORT_1, 4, GPIO__FUNCTION_4); // MISO
 
   // CS is ACTIVE LOW!!!
   gpio__set_function(XDCS, GPIO__FUNCITON_0_IO_PIN);
@@ -248,21 +260,21 @@ bool mp3_decoder_needs_data(void) { return gpio__get(DREQ); }
 
 void mp3_player_task(void *p) {
   unsigned char bytes_512[512];
-  unsigned char *write_ptr;
-  write_ptr = &bytes_512[0];
   while (1) {
     if (xQueueReceive(Q_songdata, &bytes_512[0], portMAX_DELAY)) {
-      // unsigned int length = (sizeof(bytes_512));
-      for (int i = 0; i < sizeof(bytes_512); i++) {
-        write_ptr = &bytes_512[i];
-        while (!mp3_decoder_needs_data()) {
+      size_t byte_counter = 0;
+      while (byte_counter < sizeof(bytes_512)) {
+        if (mp3_decoder_needs_data()) {
+          gpio__reset(XDCS);
+          for (size_t byte = byte_counter; byte < (byte_counter + 32); byte++) {
+            ssp2__exchange_byte(bytes_512[byte]);
+            // printf("%x ", bytes_512[byte]);
+          }
+          gpio__set(XDCS);
+          byte_counter += 32;
+        } else {
           vTaskDelay(1);
         }
-        // SDI_WRITE(&bytes_512[0] + bufferPos, BYTES_2_WRITE);
-        printf("%x ", *write_ptr);
-        gpio__reset(XDCS);
-        ssp2__exchange_byte(*write_ptr++);
-        gpio__set(XDCS);
       }
     }
   }

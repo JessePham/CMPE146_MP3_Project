@@ -68,6 +68,7 @@ int main(void) {
   initialize_lcd_screen();
   initialize_buttons();
   song_list__populate();
+
   ssp2__initialize(24000);
   initialize_SPI_GPIO();
   initialize_decoder();
@@ -114,27 +115,13 @@ void initialize_decoder(void) {
 
   set_volume(40);
 
-  uint16_t SCI_MODE = SCI_READ(0x00);
   uint16_t SCI_CLOCK = SCI_READ(0x03);
-  uint16_t SCI_STATUS = SCI_READ(0x01);
 
-  printf("\nstart_up mode: 0x%x\n", SCI_MODE);
   printf("start_up clock: 0x%x\n", SCI_CLOCK);
-  printf("start_up status: 0x%x\n", SCI_STATUS);
 
-  SCI_WRITE(0x00, 0x0004); // soft reset
-  SCI_WRITE(0x00, 0x88D0); // set mode: prev 0x8880
-  SCI_WRITE(0x03, 0x2000); // set multiplier to 3x
+  SCI_WRITE(0x03, 0x6000); // set multiplier to 3x
 
-  SCI_MODE = SCI_READ(0x00);
-  SCI_CLOCK = SCI_READ(0x03);
-  SCI_STATUS = SCI_READ(0x01);
-
-  ssp2__set_max_clock(4000);
-
-  printf("\ninitialized mode: 0x%x\n", SCI_MODE);
   printf("initialized clock: 0x%x\n", SCI_CLOCK);
-  printf("initialized status: 0x%x\n", SCI_STATUS);
 }
 void SDI_WRITE(uint8_t *data_buffer, uint8_t count) {
   gpio__reset(XDCS);
@@ -242,7 +229,7 @@ void mp3_reader_task(void *p) {
         while (!f_eof(&file)) {
           if (FR_OK == f_read(&file, bytes_512, 512, &bytes_read)) {
             xQueueSend(Q_songdata, &bytes_512[0], portMAX_DELAY);
-            vTaskDelay(200);
+            vTaskDelay(1);
           } else {
             printf("ERROR: Failed to read data to file\n");
           }

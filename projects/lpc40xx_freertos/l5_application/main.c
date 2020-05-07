@@ -5,6 +5,9 @@
 
 #include "FreeRTOS.h"
 #include "cli_handlers.h"
+#include "lpc_peripherals.h"
+
+#include "adc.h"
 #include "delay.h"
 #include "gpio.h"
 #include "lcd.h"
@@ -14,6 +17,7 @@
 #include "spi.h"
 #include "ssp2.h"
 #include "string.h"
+#include "volume.h"
 
 void mp3_reader_task(void *p);
 void mp3_player_task(void *p);
@@ -30,6 +34,7 @@ void SDI_WRITE(uint8_t *data_buffer, uint8_t count);
 void set_volume(uint8_t volume);
 uint16_t SCI_READ(uint8_t address);
 bool mp3_decoder_needs_data(void);
+void change_volume_task(void *p);
 
 typedef char songname_t[32];
 
@@ -48,6 +53,7 @@ gpio_s XDCS = {0, 15};
 gpio_s MP3CS = {1, 31};
 gpio_s DREQ = {1, 20};
 gpio_s RESET = {0, 9};
+gpio_s volume_knob = {1, 30};
 
 FIL file;
 
@@ -69,10 +75,14 @@ int main(void) {
   initialize_buttons();
   song_list__populate();
 
+  gpio__set_as_input(volume_knob);
+  gpio__construct_with_function(1, 30, 3);
+
   ssp2__initialize(24000);
   initialize_SPI_GPIO();
   initialize_decoder();
 
+  xTaskCreate(change_volume_task, "change_volume", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(next_song_task, "next_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(prev_song_task, "prev_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(display_songs_on_lcd, "display_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
@@ -81,6 +91,18 @@ int main(void) {
   sj2_cli__init();
   vTaskStartScheduler();
   return 0;
+}
+void change_volume_task(void *p) {
+  uint8_t volume;
+  adc__initialize();
+  LPC_IOCON->P1_30 |= (1 << 3);
+  LPC_IOCON->P1_30 &= ~(1 << 7);
+  while (1) {
+    volume = volume_control();
+    printf("%x\n", volume);
+    set_volume(volume);
+    vTaskDelay(1);
+  }
 }
 uint16_t SCI_READ(uint8_t address) {
   while (!mp3_decoder_needs_data())
@@ -217,7 +239,6 @@ void display_songs_on_lcd(void *p) {
     }
   }
 }
-
 void mp3_reader_task(void *p) {
   songname_t name;
   unsigned char bytes_512[512];
@@ -229,9 +250,9 @@ void mp3_reader_task(void *p) {
         while (!f_eof(&file)) {
           if (FR_OK == f_read(&file, bytes_512, 512, &bytes_read)) {
             xQueueSend(Q_songdata, &bytes_512[0], portMAX_DELAY);
-            vTaskDelay(1);
+            vTaskDelay(2);
           } else {
-            printf("ERROR: Failed to read data to file\n");
+            printf("ERRO  R: Failed to read data to file\n");
           }
         }
         printf("\nDone\n");

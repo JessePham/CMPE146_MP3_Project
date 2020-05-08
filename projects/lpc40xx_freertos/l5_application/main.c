@@ -4,15 +4,13 @@
 #include <stdlib.h>
 
 #include "FreeRTOS.h"
-#include "cli_handlers.h"
 #include "lpc_peripherals.h"
 
 #include "adc.h"
 #include "delay.h"
 #include "gpio.h"
-#include "lcd.h"
+#include "lcd_lab.h"
 #include "queue.h"
-#include "sj2_cli.h"
 #include "song_list.h"
 #include "spi.h"
 #include "ssp2.h"
@@ -32,9 +30,9 @@ void initialize_decoder(void);
 void SCI_WRITE(uint8_t address, uint16_t value);
 void SDI_WRITE(uint8_t *data_buffer, uint8_t count);
 void set_volume(uint8_t volume);
-uint16_t SCI_READ(uint8_t address);
 bool mp3_decoder_needs_data(void);
 void change_volume_task(void *p);
+uint16_t SCI_READ(uint8_t address);
 
 typedef char songname_t[32];
 
@@ -45,6 +43,7 @@ SemaphoreHandle_t prev_song_signal;
 
 gpio_s next_button = {0, 30};
 gpio_s prev_button = {0, 29};
+gpio_s play_button = {4, 28};
 
 gpio_s SCK = {1, 0};
 gpio_s MOSI = {1, 1};
@@ -88,7 +87,7 @@ int main(void) {
   xTaskCreate(display_songs_on_lcd, "display_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(mp3_reader_task, "mp3_read", 2048 / sizeof(void *), NULL, PRIORITY_MEDIUM, NULL);
   xTaskCreate(mp3_player_task, "mp3_play", 2048 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
-  sj2_cli__init();
+
   vTaskStartScheduler();
   return 0;
 }
@@ -192,6 +191,8 @@ void initialize_buttons() {
   gpio__set_as_input(next_button);
   gpio__set_function(prev_button, GPIO__FUNCITON_0_IO_PIN);
   gpio__set_as_input(prev_button);
+  gpio__set_function(play_button, GPIO__FUNCITON_0_IO_PIN);
+  gpio__set_as_input(play_button);
 }
 
 void initialize_SPI_GPIO() {

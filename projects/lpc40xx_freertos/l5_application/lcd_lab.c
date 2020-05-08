@@ -63,6 +63,12 @@ void lcd__write_name(const char *name) {
   }
 }
 
+void lcd__write_continue(const char *value) {
+  for (int i = 0; i < strlen(value); i++) {
+    lcd__write_character(value[i]);
+  }
+}
+
 void initialize_lcd_pins(void) {
   // Enable Signal
   gpio__construct_with_function(GPIO__PORT_2, 0, GPIO__FUNCITON_0_IO_PIN);
@@ -163,4 +169,45 @@ void initialize_lcd_screen(void) {
   delay__ms(15);
   lcd__set_databits(0x06);
   lcd__clock_pulse();
+}
+
+void lcd__set_cursor_position(uint8_t row, uint8_t col) {
+  uint8_t position = (col + (row * 40)) + 0x80;
+  LPC_GPIO2->CLR |= EN;
+  LPC_GPIO2->CLR |= RS;
+  LPC_GPIO2->CLR |= RW;
+
+  lcd__set_databits(position >> 4);
+  lcd__clock_pulse();
+  lcd__set_databits(position);
+  lcd__clock_pulse();
+
+  delay__ms(1);
+}
+
+void lcd__cursor_move_left(void) {
+  LPC_GPIO2->CLR |= EN;
+  LPC_GPIO2->CLR |= RS;
+  LPC_GPIO2->CLR |= RW;
+
+  lcd__set_databits(0x00);
+  lcd__clock_pulse();
+  lcd__set_databits(0x05);
+  lcd__clock_pulse();
+
+  delay__ms(1);
+}
+
+void lcd__show_volume(int level) {
+  uint8_t max_index = 10;
+  lcd__set_cursor_position(1, 0);
+  lcd__write_continue("Volume:");
+
+  for (int i = 0; i < level; i++) {
+    lcd__write_character(0xFF);
+  }
+
+  for (int j = 0; j < max_index - level; j++) {
+    lcd__write_character(0x10);
+  }
 }

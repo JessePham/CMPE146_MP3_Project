@@ -93,9 +93,14 @@ int main(void) {
   vTaskStartScheduler();
   return 0;
 }
+
+void show_volume_level(void) {
+  uint8_t volume_level = (254 - volume_control()) / 26;
+  lcd__show_volume(volume_level);
+}
+
 void change_volume_task(void *p) {
   volatile uint8_t volume;
-  const char *volume_text = "Volume:";
   adc__initialize();
   LPC_IOCON->P1_30 |= (1 << 3);
   LPC_IOCON->P1_30 &= ~(1 << 7);
@@ -105,10 +110,8 @@ void change_volume_task(void *p) {
     if (temp < (volume - 26) || temp > (volume + 26)) {
       temp = volume;
       set_volume(volume);
-      lcd__write_name(volume_text);
-      for (int i = 0; i < volume / 26; i++) {
-        lcd__write_character(0xFF);
-      }
+
+      show_volume_level();
     }
     vTaskDelay(1);
   }
@@ -237,6 +240,9 @@ void display_songs_on_lcd(void *p) {
   lcd__clear_display();
   lcd__write_name(current_song);
 
+  lcd__set_cursor_position(1, 0);
+  lcd__write_continue("Volume:");
+  show_volume_level();
   while (1) {
     if (xSemaphoreTake(next_song_signal, 100)) {
       if (++song_index >= song_list__get_item_count()) {
@@ -245,6 +251,9 @@ void display_songs_on_lcd(void *p) {
       current_song = song_list__get_name_for_item(song_index);
       lcd__clear_display();
       lcd__write_name(current_song);
+      lcd__set_cursor_position(1, 0);
+      lcd__write_continue("Volume:");
+      show_volume_level();
       vTaskDelay(500);
     }
 
@@ -255,6 +264,9 @@ void display_songs_on_lcd(void *p) {
       current_song = song_list__get_name_for_item(song_index);
       lcd__clear_display();
       lcd__write_name(current_song);
+      lcd__set_cursor_position(1, 0);
+      lcd__write_continue("Volume:");
+      show_volume_level();
       vTaskDelay(500);
     }
   }

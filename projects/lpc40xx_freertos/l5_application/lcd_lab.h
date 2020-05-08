@@ -22,4 +22,12 @@ void lcd__write_character(char c);
 
 void lcd__write_name(const char *name);
 
+void lcd__write_continue(const char *value);
+
 void lcd__clear_display(void);
+
+void lcd__set_cursor_position(uint8_t row, uint8_t col);
+
+void lcd__cursor_move_left(void);
+
+void lcd__show_volume(int level);

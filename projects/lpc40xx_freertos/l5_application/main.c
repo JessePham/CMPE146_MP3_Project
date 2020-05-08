@@ -12,7 +12,6 @@
 #include "lcd_lab.h"
 #include "queue.h"
 #include "song_list.h"
-#include "spi.h"
 #include "ssp2.h"
 #include "string.h"
 #include "volume.h"

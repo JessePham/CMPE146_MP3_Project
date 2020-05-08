@@ -20,6 +20,7 @@ void mp3_reader_task(void *p);
 void mp3_player_task(void *p);
 void next_song_task(void *p);
 void prev_song_task(void *p);
+void play_button_task(void *p);
 
 void display_songs_on_lcd(void *p);
 void initialize_buttons(void);
@@ -80,6 +81,7 @@ int main(void) {
   initialize_SPI_GPIO();
   initialize_decoder();
 
+  xTaskCreate(play_button_task, "play_button", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(change_volume_task, "change_volume", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(next_song_task, "next_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(prev_song_task, "prev_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
@@ -102,6 +104,15 @@ void change_volume_task(void *p) {
     vTaskDelay(1);
   }
 }
+
+void play_button_task(void *p) {
+  while (1) {
+    if (gpio__get(play_button)) {
+      xQueueSend(Q_songname, current_song, portMAX_DELAY);
+    }
+  }
+}
+
 uint16_t SCI_READ(uint8_t address) {
   while (!mp3_decoder_needs_data())
     ;

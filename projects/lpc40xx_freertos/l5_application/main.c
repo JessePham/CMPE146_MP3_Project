@@ -55,6 +55,7 @@ gpio_s RESET = {0, 9};
 gpio_s volume_knob = {1, 30};
 
 FIL file;
+const char *current_song;
 
 void set_volume(uint8_t volume) {
   uint16_t _volume;
@@ -93,14 +94,22 @@ int main(void) {
   return 0;
 }
 void change_volume_task(void *p) {
-  uint8_t volume;
+  volatile uint8_t volume;
+  const char *volume_text = "Volume:";
   adc__initialize();
   LPC_IOCON->P1_30 |= (1 << 3);
   LPC_IOCON->P1_30 &= ~(1 << 7);
+  uint8_t temp = volume_control();
   while (1) {
     volume = volume_control();
-    printf("%x\n", volume);
-    set_volume(volume);
+    if (temp < (volume - 26) || temp > (volume + 26)) {
+      temp = volume;
+      set_volume(volume);
+      lcd__write_name(volume_text);
+      for (int i = 0; i < volume / 26; i++) {
+        lcd__write_character(0xFF);
+      }
+    }
     vTaskDelay(1);
   }
 }
@@ -224,7 +233,7 @@ void initialize_SPI_GPIO() {
 
 void display_songs_on_lcd(void *p) {
   int song_index = 0;
-  const char *current_song = song_list__get_name_for_item(song_index);
+  current_song = song_list__get_name_for_item(song_index);
   lcd__clear_display();
   lcd__write_name(current_song);
 

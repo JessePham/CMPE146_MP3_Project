@@ -94,7 +94,6 @@ int main(void) {
   ssp2__initialize(24000);
   initialize_SPI_GPIO();
   initialize_decoder();
-  SCI_WRITE(0x02, 0x7A06);
 
   xTaskCreate(treble_control_task, "treble_control", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(bass_control_task, "bass_control", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
@@ -125,6 +124,7 @@ void init_bass_treble_buttons(void) {
 void treble_control_task(void *p) {
   uint16_t treble_register_value;
   uint16_t treble_value;
+  SCI_WRITE(0x02, 0x7A06);
   while (1) {
     if (gpio__get(TREBLE_UP)) {
       printf("\nTREBLE UP PRESSED\n");
@@ -132,7 +132,7 @@ void treble_control_task(void *p) {
       uint16_t temp16 = treble_register_value + 0x1000;
       // uint8_t temp8 = temp16 << 8;
       printf("0x%x\n", temp16);
-      if (temp16 < 0xFAFF) {
+      if (temp16 < 0xFA00) {
         treble_value = treble_register_value + 0x1000;
       } else {
         treble_value = treble_register_value;
@@ -143,30 +143,32 @@ void treble_control_task(void *p) {
       printf("Treble up: %x\n", treble_value);
       vTaskDelay(100);
     }
-    // if (gpio__get(TREBLE_DOWN)) {
-    //   printf("\nTREBLE DOWN PRESSED\n");
-    //   treble_register_value = SCI_READ(0x02);
-    //   printf("starting treble: %x\n", treble_register_value);
-    //   uint16_t temp16 = treble_register_value - 0x1000;
-    //   printf("0x%x\n", temp16);
-    //   if (temp16 <= 0x0AF6) {
-    //     treble_value = treble_register_value;
-    //     printf("Lowest treble setting\n");
-    //   } else {
-    //     treble_value = treble_register_value - 0x1000;
-    //   }
+    if (gpio__get(TREBLE_DOWN)) {
+      printf("\nTREBLE DOWN PRESSED\n");
+      treble_register_value = SCI_READ(0x02);
+      printf("starting treble: %x\n", treble_register_value);
+      uint16_t temp16 = treble_register_value - 0x1000;
+      printf("0x%x\n", temp16);
+      if (temp16 > 0x0AF6) {
+        treble_value = treble_register_value - 0x1000;
+      } else {
+        treble_value = treble_register_value;
+        printf("Lowest treble setting\n");
+      }
 
-    //   printf("treble down: %x\n", treble_value);
-    //   SCI_WRITE(0x02, treble_value);
-    //   vTaskDelay(100);
-    // } else {
-    //   vTaskDelay(1);
-    // }
+      printf("treble down: %x\n", treble_value);
+      SCI_WRITE(0x02, treble_value);
+      vTaskDelay(100);
+    } else {
+      vTaskDelay(1);
+    }
   }
 }
 void bass_control_task(void *p) {
   uint16_t bass_register_value;
   uint16_t bass_value;
+  SCI_WRITE(0x02, 0x7A06);
+  printf("\n0x%x\n", SCI_READ(0x02));
   while (1) {
     if (gpio__get(BASS_UP)) {
       printf("\nBASS UP PRESSED\n");

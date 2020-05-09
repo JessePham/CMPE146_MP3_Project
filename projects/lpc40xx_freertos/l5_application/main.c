@@ -23,6 +23,7 @@ void mp3_reader_task(void *p);
 void mp3_player_task(void *p);
 void next_song_task(void *p);
 void prev_song_task(void *p);
+void play_button_task(void *p);
 
 void display_songs_on_lcd(void *p);
 void initialize_buttons(void);
@@ -34,7 +35,11 @@ void SDI_WRITE(uint8_t *data_buffer, uint8_t count);
 void set_volume(uint8_t volume);
 uint16_t SCI_READ(uint8_t address);
 bool mp3_decoder_needs_data(void);
+
 void change_volume_task(void *p);
+void init_bass_treble_buttons(void);
+void bass_control_task(void *p);
+void treble_control_task(void *p);
 
 typedef char songname_t[32];
 
@@ -45,6 +50,7 @@ SemaphoreHandle_t prev_song_signal;
 
 gpio_s next_button = {0, 30};
 gpio_s prev_button = {0, 29};
+gpio_s play_button = {4, 28};
 
 gpio_s SCK = {1, 0};
 gpio_s MOSI = {1, 1};
@@ -53,8 +59,14 @@ gpio_s XDCS = {0, 15};
 gpio_s MP3CS = {1, 31};
 gpio_s DREQ = {1, 20};
 gpio_s RESET = {0, 9};
-gpio_s volume_knob = {1, 30};
 
+gpio_s volume_knob = {1, 30};
+gpio_s BASS_UP = {0, 17};
+gpio_s BASS_DOWN = {0, 22};
+gpio_s TREBLE_UP = {0, 0};
+gpio_s TREBLE_DOWN = {0, 11};
+
+const char *current_song;
 FIL file;
 
 void set_volume(uint8_t volume) {
@@ -73,6 +85,7 @@ int main(void) {
   initialize_lcd_pins();
   initialize_lcd_screen();
   initialize_buttons();
+  init_bass_treble_buttons();
   song_list__populate();
 
   gpio__set_as_input(volume_knob);
@@ -81,27 +94,143 @@ int main(void) {
   ssp2__initialize(24000);
   initialize_SPI_GPIO();
   initialize_decoder();
+  SCI_WRITE(0x02, 0x7A06);
 
+  xTaskCreate(treble_control_task, "treble_control", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+  xTaskCreate(bass_control_task, "bass_control", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(change_volume_task, "change_volume", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+
+  // xTaskCreate(play_button_task, "play_button", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(next_song_task, "next_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(prev_song_task, "prev_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+
   xTaskCreate(display_songs_on_lcd, "display_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(mp3_reader_task, "mp3_read", 2048 / sizeof(void *), NULL, PRIORITY_MEDIUM, NULL);
   xTaskCreate(mp3_player_task, "mp3_play", 2048 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
+
   sj2_cli__init();
   vTaskStartScheduler();
   return 0;
 }
+void init_bass_treble_buttons(void) {
+  gpio__set_function(BASS_UP, GPIO__FUNCITON_0_IO_PIN);
+  gpio__set_as_input(BASS_UP);
+  gpio__set_function(BASS_DOWN, GPIO__FUNCITON_0_IO_PIN);
+  gpio__set_as_input(BASS_DOWN);
+  gpio__set_function(TREBLE_UP, GPIO__FUNCITON_0_IO_PIN);
+  gpio__set_as_input(TREBLE_UP);
+  gpio__set_function(TREBLE_DOWN, GPIO__FUNCITON_0_IO_PIN);
+  gpio__set_as_input(TREBLE_DOWN);
+}
+void treble_control_task(void *p) {
+  uint16_t treble_register_value;
+  uint16_t treble_value;
+  while (1) {
+    if (gpio__get(TREBLE_UP)) {
+      printf("\nTREBLE UP PRESSED\n");
+      treble_register_value = SCI_READ(0x02); // xxxx xxxx bbbb xxxx
+      uint16_t temp16 = treble_register_value + 0x1000;
+      // uint8_t temp8 = temp16 << 8;
+      printf("0x%x\n", temp16);
+      if (temp16 < 0xFAFF) {
+        treble_value = treble_register_value + 0x1000;
+      } else {
+        treble_value = treble_register_value;
+        printf("\nMax treble\n");
+      }
+
+      SCI_WRITE(0x02, treble_value);
+      printf("Treble up: %x\n", treble_value);
+      vTaskDelay(100);
+    }
+    // if (gpio__get(TREBLE_DOWN)) {
+    //   printf("\nTREBLE DOWN PRESSED\n");
+    //   treble_register_value = SCI_READ(0x02);
+    //   printf("starting treble: %x\n", treble_register_value);
+    //   uint16_t temp16 = treble_register_value - 0x1000;
+    //   printf("0x%x\n", temp16);
+    //   if (temp16 <= 0x0AF6) {
+    //     treble_value = treble_register_value;
+    //     printf("Lowest treble setting\n");
+    //   } else {
+    //     treble_value = treble_register_value - 0x1000;
+    //   }
+
+    //   printf("treble down: %x\n", treble_value);
+    //   SCI_WRITE(0x02, treble_value);
+    //   vTaskDelay(100);
+    // } else {
+    //   vTaskDelay(1);
+    // }
+  }
+}
+void bass_control_task(void *p) {
+  uint16_t bass_register_value;
+  uint16_t bass_value;
+  while (1) {
+    if (gpio__get(BASS_UP)) {
+      printf("\nBASS UP PRESSED\n");
+      bass_register_value = SCI_READ(0x02); // xxxx xxxx bbbb xxxx
+      printf("starting bass: %x\n", bass_register_value);
+      uint8_t temp = bass_register_value + 0b10000;
+      printf("0x%x\n", temp);
+      if (temp < 0xf4) {
+        bass_value = bass_register_value + 0b10000;
+      } else {
+        bass_value = bass_register_value;
+        printf("\nReduce Bass\n");
+      }
+
+      SCI_WRITE(0x02, bass_value);
+      printf("bass up: %x\n", bass_value);
+      vTaskDelay(100);
+    }
+    if (gpio__get(BASS_DOWN)) {
+      printf("\nBASS DOWN PRESSED\n");
+      bass_register_value = SCI_READ(0x02);
+      printf("starting bass: %x\n", bass_register_value);
+      uint8_t temp = bass_register_value - 0b10000;
+      printf("0x%x\n", temp);
+      if (temp <= 0x0f) {
+        bass_value = bass_register_value;
+        printf("\nLowest bass setting\n");
+      } else {
+        bass_value = bass_register_value - 0b10000;
+      }
+
+      printf("bass down: %x\n", bass_value);
+      SCI_WRITE(0x02, bass_value);
+      vTaskDelay(100);
+    } else {
+      vTaskDelay(1);
+    }
+  }
+}
 void change_volume_task(void *p) {
-  uint8_t volume;
+  volatile uint8_t volume;
+  const char *volume_text = "Volume:";
   adc__initialize();
   LPC_IOCON->P1_30 |= (1 << 3);
   LPC_IOCON->P1_30 &= ~(1 << 7);
+  uint8_t temp = volume_control();
   while (1) {
     volume = volume_control();
-    printf("%x\n", volume);
     set_volume(volume);
+    if (temp < (volume - 26) || temp > (volume + 26)) {
+      temp = volume;
+      lcd__write_name(volume_text);
+      for (int i = 0; i < volume / 26; i++) {
+        lcd__write_character(0xFF);
+      }
+    }
     vTaskDelay(1);
+  }
+}
+void play_button_task(void *p) {
+  while (1) {
+    if (gpio__get(play_button)) {
+      xQueueSend(Q_songname, current_song, portMAX_DELAY);
+    }
   }
 }
 uint16_t SCI_READ(uint8_t address) {
@@ -192,6 +321,8 @@ void initialize_buttons() {
   gpio__set_as_input(next_button);
   gpio__set_function(prev_button, GPIO__FUNCITON_0_IO_PIN);
   gpio__set_as_input(prev_button);
+  gpio__set_function(play_button, GPIO__FUNCITON_0_IO_PIN);
+  gpio__set_as_input(play_button);
 }
 
 void initialize_SPI_GPIO() {
@@ -213,7 +344,7 @@ void initialize_SPI_GPIO() {
 
 void display_songs_on_lcd(void *p) {
   int song_index = 0;
-  const char *current_song = song_list__get_name_for_item(song_index);
+  current_song = song_list__get_name_for_item(song_index);
   lcd__clear_display();
   lcd__write_name(current_song);
 

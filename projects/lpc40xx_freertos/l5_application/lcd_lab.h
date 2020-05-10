@@ -30,4 +30,8 @@ void lcd__set_cursor_position(uint8_t row, uint8_t col);
 
 void lcd__cursor_move_left(void);
 
-void lcd__show_volume(int level);
+void lcd__cursor_move_right(void);
+
+void lcd__show_levels(uint8_t volume_level, uint8_t treble_level, uint8_t bass_level);
+
+void lcd__write_digit(uint8_t digit);

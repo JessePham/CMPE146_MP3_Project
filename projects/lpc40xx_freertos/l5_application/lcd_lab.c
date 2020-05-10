@@ -192,22 +192,82 @@ void lcd__cursor_move_left(void) {
 
   lcd__set_databits(0x00);
   lcd__clock_pulse();
-  lcd__set_databits(0x05);
+  lcd__set_databits(0x0C);
   lcd__clock_pulse();
 
   delay__ms(1);
 }
 
-void lcd__show_volume(int level) {
-  uint8_t max_index = 10;
-  lcd__set_cursor_position(1, 0);
-  lcd__write_continue("Volume:");
+void lcd__cursor_move_right(void) {
+  LPC_GPIO2->CLR |= EN;
+  LPC_GPIO2->CLR |= RS;
+  LPC_GPIO2->CLR |= RW;
 
-  for (int i = 0; i < level; i++) {
+  lcd__set_databits(0x00);
+  lcd__clock_pulse();
+  lcd__set_databits(0x08);
+  lcd__clock_pulse();
+
+  delay__ms(1);
+}
+
+void lcd__show_levels(uint8_t volume_level, uint8_t treble_level, uint8_t bass_level) {
+  uint8_t max_index = 4;
+  lcd__set_cursor_position(1, 0);
+  lcd__write_continue("V:");
+
+  for (int i = 0; i < volume_level / 2; i++) {
     lcd__write_character(0xFF);
+    max_index--;
   }
 
-  for (int j = 0; j < max_index - level; j++) {
+  for (max_index; max_index > 0; max_index--) {
     lcd__write_character(0x10);
+  }
+
+  lcd__write_character(0x10);
+  lcd__write_continue("T:");
+  lcd__write_digit(treble_level);
+
+  lcd__write_character(0x10);
+  lcd__write_continue("B:");
+  lcd__write_digit(bass_level);
+}
+
+void lcd__write_digit(uint8_t digit) {
+  switch (digit) {
+  case 0:
+    lcd__write_character(0x30);
+    break;
+  case 1:
+    lcd__write_character(0x31);
+    break;
+  case 2:
+    lcd__write_character(0x32);
+    break;
+  case 3:
+    lcd__write_character(0x33);
+    break;
+  case 4:
+    lcd__write_character(0x34);
+    break;
+  case 5:
+    lcd__write_character(0x35);
+    break;
+  case 6:
+    lcd__write_character(0x36);
+    break;
+  case 7:
+    lcd__write_character(0x37);
+    break;
+  case 8:
+    lcd__write_character(0x38);
+    break;
+  case 9:
+    lcd__write_character(0x39);
+    break;
+  default:
+    lcd__write_character(' ');
+    break;
   }
 }

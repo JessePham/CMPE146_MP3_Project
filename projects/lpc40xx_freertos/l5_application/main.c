@@ -35,6 +35,8 @@ void SDI_WRITE(uint8_t *data_buffer, uint8_t count);
 void set_volume(uint8_t volume);
 uint16_t SCI_READ(uint8_t address);
 bool mp3_decoder_needs_data(void);
+// void show_volume_level(void);
+void show_lcd_levels(void);
 
 void change_volume_task(void *p);
 void init_bass_treble_buttons(void);
@@ -64,7 +66,7 @@ gpio_s volume_knob = {1, 30};
 gpio_s BASS_UP = {0, 17};
 gpio_s BASS_DOWN = {0, 22};
 gpio_s TREBLE_UP = {0, 0};
-gpio_s TREBLE_DOWN = {0, 11};
+gpio_s TREBLE_DOWN = {0, 26};
 
 const char *current_song;
 FIL file;
@@ -99,13 +101,13 @@ int main(void) {
   xTaskCreate(bass_control_task, "bass_control", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(change_volume_task, "change_volume", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
 
-  // xTaskCreate(play_button_task, "play_button", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
-  xTaskCreate(next_song_task, "next_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
-  xTaskCreate(prev_song_task, "prev_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
-
   xTaskCreate(display_songs_on_lcd, "display_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(mp3_reader_task, "mp3_read", 2048 / sizeof(void *), NULL, PRIORITY_MEDIUM, NULL);
   xTaskCreate(mp3_player_task, "mp3_play", 2048 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
+
+  xTaskCreate(play_button_task, "play_button", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+  xTaskCreate(next_song_task, "next_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
+  xTaskCreate(prev_song_task, "prev_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
 
   sj2_cli__init();
   vTaskStartScheduler();
@@ -124,7 +126,7 @@ void init_bass_treble_buttons(void) {
 void treble_control_task(void *p) {
   uint16_t treble_register_value;
   uint16_t treble_value;
-  SCI_WRITE(0x02, 0x7A06);
+  SCI_WRITE(0x02, 0x0506);
   while (1) {
     if (gpio__get(TREBLE_UP)) {
       printf("\nTREBLE UP PRESSED\n");
@@ -132,7 +134,7 @@ void treble_control_task(void *p) {
       uint16_t temp16 = treble_register_value + 0x1000;
       // uint8_t temp8 = temp16 << 8;
       printf("0x%x\n", temp16);
-      if (temp16 < 0xFA00) {
+      if (temp16 < 0xF500) {
         treble_value = treble_register_value + 0x1000;
       } else {
         treble_value = treble_register_value;
@@ -141,6 +143,7 @@ void treble_control_task(void *p) {
 
       SCI_WRITE(0x02, treble_value);
       printf("Treble up: %x\n", treble_value);
+      show_lcd_levels();
       vTaskDelay(100);
     }
     if (gpio__get(TREBLE_DOWN)) {
@@ -149,15 +152,16 @@ void treble_control_task(void *p) {
       printf("starting treble: %x\n", treble_register_value);
       uint16_t temp16 = treble_register_value - 0x1000;
       printf("0x%x\n", temp16);
-      if (temp16 > 0x0AF6) {
+      if (temp16 > 0x05FF) {
         treble_value = treble_register_value - 0x1000;
       } else {
         treble_value = treble_register_value;
-        printf("Lowest treble setting\n");
+        printf("\nLowest treble setting\n");
       }
 
       printf("treble down: %x\n", treble_value);
       SCI_WRITE(0x02, treble_value);
+      show_lcd_levels();
       vTaskDelay(100);
     } else {
       vTaskDelay(1);
@@ -167,7 +171,7 @@ void treble_control_task(void *p) {
 void bass_control_task(void *p) {
   uint16_t bass_register_value;
   uint16_t bass_value;
-  SCI_WRITE(0x02, 0x7A06);
+  SCI_WRITE(0x02, 0x0506);
   printf("\n0x%x\n", SCI_READ(0x02));
   while (1) {
     if (gpio__get(BASS_UP)) {
@@ -185,6 +189,7 @@ void bass_control_task(void *p) {
 
       SCI_WRITE(0x02, bass_value);
       printf("bass up: %x\n", bass_value);
+      show_lcd_levels();
       vTaskDelay(100);
     }
     if (gpio__get(BASS_DOWN)) {
@@ -202,28 +207,35 @@ void bass_control_task(void *p) {
 
       printf("bass down: %x\n", bass_value);
       SCI_WRITE(0x02, bass_value);
+      show_lcd_levels();
       vTaskDelay(100);
     } else {
       vTaskDelay(1);
     }
   }
 }
+void show_lcd_levels(void) {
+  uint8_t volume_level = (254 - volume_control()) / 26;
+
+  uint8_t treble_level = (SCI_READ(0x02) >> 12);
+  uint16_t temp = (SCI_READ(0x02) << 8);
+  uint8_t bass_level = temp >> 12;
+  printf("\nVolume: %i\tBass: %i\tTreble: %i\n", volume_level, bass_level, treble_level);
+  lcd__show_levels(volume_level, treble_level, bass_level);
+}
 void change_volume_task(void *p) {
   volatile uint8_t volume;
-  const char *volume_text = "Volume:";
   adc__initialize();
   LPC_IOCON->P1_30 |= (1 << 3);
   LPC_IOCON->P1_30 &= ~(1 << 7);
   uint8_t temp = volume_control();
   while (1) {
     volume = volume_control();
-    set_volume(volume);
     if (temp < (volume - 26) || temp > (volume + 26)) {
       temp = volume;
-      lcd__write_name(volume_text);
-      for (int i = 0; i < volume / 26; i++) {
-        lcd__write_character(0xFF);
-      }
+      set_volume(volume);
+
+      show_lcd_levels();
     }
     vTaskDelay(1);
   }
@@ -231,6 +243,7 @@ void change_volume_task(void *p) {
 void play_button_task(void *p) {
   while (1) {
     if (gpio__get(play_button)) {
+      printf("\nplay button pressed\n");
       xQueueSend(Q_songname, current_song, portMAX_DELAY);
     }
   }
@@ -349,7 +362,8 @@ void display_songs_on_lcd(void *p) {
   current_song = song_list__get_name_for_item(song_index);
   lcd__clear_display();
   lcd__write_name(current_song);
-
+  // treble and bass 1st and 3rd
+  show_lcd_levels();
   while (1) {
     if (xSemaphoreTake(next_song_signal, 100)) {
       if (++song_index >= song_list__get_item_count()) {
@@ -358,6 +372,7 @@ void display_songs_on_lcd(void *p) {
       current_song = song_list__get_name_for_item(song_index);
       lcd__clear_display();
       lcd__write_name(current_song);
+      show_lcd_levels();
       vTaskDelay(500);
     }
 
@@ -368,6 +383,7 @@ void display_songs_on_lcd(void *p) {
       current_song = song_list__get_name_for_item(song_index);
       lcd__clear_display();
       lcd__write_name(current_song);
+      show_lcd_levels();
       vTaskDelay(500);
     }
   }
@@ -379,13 +395,14 @@ void mp3_reader_task(void *p) {
   while (1) {
     if (xQueueReceive(Q_songname, &name[0], portMAX_DELAY)) {
       FRESULT read_file = f_open(&file, &name[0], FA_READ);
+      // printf("\nplaying song: %s\n", name[0]);
       if (FR_OK == read_file) {
         while (!f_eof(&file)) {
           if (FR_OK == f_read(&file, bytes_512, 512, &bytes_read)) {
             xQueueSend(Q_songdata, &bytes_512[0], portMAX_DELAY);
             vTaskDelay(2);
           } else {
-            printf("ERRO  R: Failed to read data to file\n");
+            printf("ERR0R: Failed to read data to file\n");
           }
         }
         printf("\nDone\n");

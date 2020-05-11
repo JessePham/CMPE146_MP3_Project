@@ -24,6 +24,7 @@ void mp3_player_task(void *p);
 void next_song_task(void *p);
 void prev_song_task(void *p);
 void play_button_task(void *p);
+void pause_button_task(void *p);
 
 void display_songs_on_lcd(void *p);
 void initialize_buttons(void);
@@ -49,10 +50,14 @@ QueueHandle_t Q_songname;
 QueueHandle_t Q_songdata;
 SemaphoreHandle_t next_song_signal;
 SemaphoreHandle_t prev_song_signal;
+SemaphoreHandle_t play_song_signal;
+SemaphoreHandle_t pause_song_signal;
+SemaphoreHandle_t unpause_song_signal;
 
 gpio_s next_button = {0, 30};
 gpio_s prev_button = {0, 29};
 gpio_s play_button = {4, 28};
+gpio_s pause_button = {1, 14};
 
 gpio_s SCK = {1, 0};
 gpio_s MOSI = {1, 1};
@@ -70,7 +75,7 @@ gpio_s TREBLE_DOWN = {0, 26};
 
 const char *current_song;
 FIL file;
-
+// int pause_song = 0;
 void set_volume(uint8_t volume) {
   uint16_t _volume;
   _volume = (volume << 8) + volume;
@@ -83,6 +88,9 @@ int main(void) {
   Q_songdata = xQueueCreate(1, 512);
   next_song_signal = xSemaphoreCreateBinary();
   prev_song_signal = xSemaphoreCreateBinary();
+  play_song_signal = xSemaphoreCreateBinary();
+  pause_song_signal = xSemaphoreCreateBinary();
+  unpause_song_signal = xSemaphoreCreateBinary();
 
   initialize_lcd_pins();
   initialize_lcd_screen();
@@ -105,6 +113,7 @@ int main(void) {
   xTaskCreate(mp3_reader_task, "mp3_read", 2048 / sizeof(void *), NULL, PRIORITY_MEDIUM, NULL);
   xTaskCreate(mp3_player_task, "mp3_play", 2048 / sizeof(void *), NULL, PRIORITY_HIGH, NULL);
 
+  xTaskCreate(pause_button_task, "pause_button", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(play_button_task, "play_button", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(next_song_task, "next_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
   xTaskCreate(prev_song_task, "prev_song", 2048 / sizeof(void *), NULL, PRIORITY_LOW, NULL);
@@ -113,6 +122,34 @@ int main(void) {
   vTaskStartScheduler();
   return 0;
 }
+void pause_button_task(void *p) {
+  static uint8_t pause = 0;
+  while (1) {
+    if (gpio__get(pause_button)) {
+      if (pause == 0) {
+        pause = 1;
+        printf("\nPause\n");
+        xSemaphoreGive(pause_song_signal);
+        vTaskDelay(200);
+      } else if (pause == 1) {
+        pause = 0;
+        printf("\nResume\n");
+        xSemaphoreGive(unpause_song_signal);
+        vTaskDelay(200);
+      }
+    }
+  }
+}
+// void pause_button_task(void *p) {
+//   while (1) {
+//     if (gpio__get(pause_button)) {
+//       printf("\nPause\n");
+//       xSemaphoreGive(pause_song_signal);
+//     } else {
+//       vTaskDelay(1);
+//     }
+//   }
+// }
 void init_bass_treble_buttons(void) {
   gpio__set_function(BASS_UP, GPIO__FUNCITON_0_IO_PIN);
   gpio__set_as_input(BASS_UP);
@@ -126,15 +163,15 @@ void init_bass_treble_buttons(void) {
 void treble_control_task(void *p) {
   uint16_t treble_register_value;
   uint16_t treble_value;
-  SCI_WRITE(0x02, 0x0506);
+  SCI_WRITE(0x02, 0x1516);
+
   while (1) {
     if (gpio__get(TREBLE_UP)) {
       printf("\nTREBLE UP PRESSED\n");
       treble_register_value = SCI_READ(0x02); // xxxx xxxx bbbb xxxx
-      uint16_t temp16 = treble_register_value + 0x1000;
-      // uint8_t temp8 = temp16 << 8;
-      printf("0x%x\n", temp16);
-      if (temp16 < 0xF500) {
+      uint8_t temp = (treble_register_value >> 12) + 0x01;
+      printf("0x%x\n", temp);
+      if (temp < 0x0F) {
         treble_value = treble_register_value + 0x1000;
       } else {
         treble_value = treble_register_value;
@@ -150,9 +187,9 @@ void treble_control_task(void *p) {
       printf("\nTREBLE DOWN PRESSED\n");
       treble_register_value = SCI_READ(0x02);
       printf("starting treble: %x\n", treble_register_value);
-      uint16_t temp16 = treble_register_value - 0x1000;
-      printf("0x%x\n", temp16);
-      if (temp16 > 0x05FF) {
+      uint8_t temp = (treble_register_value >> 12) - 0x01;
+      printf("0x%x\n", temp);
+      if (temp > 0x00) {
         treble_value = treble_register_value - 0x1000;
       } else {
         treble_value = treble_register_value;
@@ -171,16 +208,19 @@ void treble_control_task(void *p) {
 void bass_control_task(void *p) {
   uint16_t bass_register_value;
   uint16_t bass_value;
-  SCI_WRITE(0x02, 0x0506);
+  SCI_WRITE(0x02, 0x1516);
   printf("\n0x%x\n", SCI_READ(0x02));
+  // uint16_t temp = (SCI_READ(0x02) << 8);
+  // uint8_t bass_level = temp >> 12;
   while (1) {
     if (gpio__get(BASS_UP)) {
       printf("\nBASS UP PRESSED\n");
       bass_register_value = SCI_READ(0x02); // xxxx xxxx bbbb xxxx
       printf("starting bass: %x\n", bass_register_value);
-      uint8_t temp = bass_register_value + 0b10000;
+      uint16_t temp1 = bass_register_value << 8;
+      uint8_t temp = (temp1 >> 12) + 0x01;
       printf("0x%x\n", temp);
-      if (temp < 0xf4) {
+      if (temp < 0x0F) {
         bass_value = bass_register_value + 0b10000;
       } else {
         bass_value = bass_register_value;
@@ -196,9 +236,10 @@ void bass_control_task(void *p) {
       printf("\nBASS DOWN PRESSED\n");
       bass_register_value = SCI_READ(0x02);
       printf("starting bass: %x\n", bass_register_value);
-      uint8_t temp = bass_register_value - 0b10000;
+      uint16_t temp1 = bass_register_value << 8;
+      uint8_t temp = (temp1 >> 12) - 0x01;
       printf("0x%x\n", temp);
-      if (temp <= 0x0f) {
+      if (temp <= 0x00) {
         bass_value = bass_register_value;
         printf("\nLowest bass setting\n");
       } else {
@@ -241,10 +282,18 @@ void change_volume_task(void *p) {
   }
 }
 void play_button_task(void *p) {
+  static uint8_t start = 0;
   while (1) {
     if (gpio__get(play_button)) {
       printf("\nplay button pressed\n");
+      if (start == 1) {
+        xSemaphoreGive(play_song_signal);
+      }
+      vTaskDelay(500);
       xQueueSend(Q_songname, current_song, portMAX_DELAY);
+      if (start == 0) {
+        start = 1;
+      }
     }
   }
 }
@@ -338,6 +387,8 @@ void initialize_buttons() {
   gpio__set_as_input(prev_button);
   gpio__set_function(play_button, GPIO__FUNCITON_0_IO_PIN);
   gpio__set_as_input(play_button);
+  gpio__set_function(pause_button, GPIO__FUNCITON_0_IO_PIN);
+  gpio__set_as_input(pause_button);
 }
 
 void initialize_SPI_GPIO() {
@@ -395,14 +446,15 @@ void mp3_reader_task(void *p) {
   while (1) {
     if (xQueueReceive(Q_songname, &name[0], portMAX_DELAY)) {
       FRESULT read_file = f_open(&file, &name[0], FA_READ);
-      // printf("\nplaying song: %s\n", name[0]);
       if (FR_OK == read_file) {
         while (!f_eof(&file)) {
           if (FR_OK == f_read(&file, bytes_512, 512, &bytes_read)) {
             xQueueSend(Q_songdata, &bytes_512[0], portMAX_DELAY);
-            vTaskDelay(2);
           } else {
             printf("ERR0R: Failed to read data to file\n");
+          }
+          if (xSemaphoreTake(play_song_signal, 2)) {
+            break;
           }
         }
         printf("\nDone\n");
@@ -419,6 +471,14 @@ bool mp3_decoder_needs_data(void) { return gpio__get(DREQ); }
 void mp3_player_task(void *p) {
   unsigned char bytes_512[512];
   while (1) {
+    // if (xSemaphoreTake(pause_song_signal, 2)) {
+    //   vTaskDelay(10);
+    //   if (xSemaphoreTake(pause_song_signal, portMAX_DELAY)) {
+    //   }
+    // }
+    if (xSemaphoreTake(pause_song_signal, 2)) {
+      xSemaphoreTake(unpause_song_signal, portMAX_DELAY);
+    }
     if (xQueueReceive(Q_songdata, &bytes_512[0], portMAX_DELAY)) {
       size_t byte_counter = 0;
       while (byte_counter < sizeof(bytes_512)) {
